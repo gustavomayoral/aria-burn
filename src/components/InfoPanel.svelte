@@ -1,0 +1,74 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<script lang="ts">
+  import { TILE_MAX_CELLS } from 'aria-burn-core/contract'
+  import { app } from '../lib/app.svelte.ts'
+
+  const machine = $derived(app.settings.machine)
+  // Grid pitch = smallest spot sigma ÷ 3, as the planner will use it (COD-260).
+  const pitchMm = $derived(Math.min(machine.spot.sigmaXMm, machine.spot.sigmaYMm) / 3)
+  const tileMm = $derived(TILE_MAX_CELLS * pitchMm)
+  const s = $derived(app.stream)
+</script>
+
+<aside>
+  {#each app.warnings as w (w)}
+    <div class="callout warn"><strong>Settings</strong><span>{w}</span></div>
+  {/each}
+  {#if s.state === 'error'}
+    <div class="callout danger">
+      <strong>Stream check failed</strong>
+      {#each s.errors.slice(0, 5) as e (e)}<span>{e}</span>{/each}
+    </div>
+  {/if}
+
+  <div>
+    <div class="section-label">Cursor</div>
+    <p class="note">Hover the canvas to read position and fluence.</p>
+  </div>
+
+  <div>
+    <div class="section-label">Job</div>
+    <div class="kv">
+      <span>Bounds</span><span>{s.state === 'idle' ? '—' : '40.0 × 30.0 mm'}</span>
+      <span>Grid pitch</span><span>{pitchMm.toFixed(3)} mm</span>
+      <span>Tile size</span><span>{tileMm.toFixed(0)} mm</span>
+      <span>Power mode</span><span>{machine.laserMode ? 'M4 (laser mode)' : 'M3'}</span>
+      <span>Passes</span><span>{s.state === 'idle' ? '—' : '1'}</span>
+    </div>
+    <p class="note">Pitch = spot σ ÷ 3. Tiles hold at most 9000² cells.</p>
+  </div>
+
+  <div>
+    <div class="section-label">Sample stream</div>
+    <div class="kv">
+      <span>State</span><span>{s.state}</span>
+      <span>Batches</span><span>{s.batches.toLocaleString()}</span>
+      <span>Samples</span><span>{s.samples.toLocaleString()}</span>
+      {#if s.state === 'done'}
+        <span>Data</span><span>{s.mb.toFixed(1)} MB</span>
+        <span>Time</span><span>{s.seconds.toFixed(2)} s</span>
+        <span>Check</span><span class="ok">plan.done ✓</span>
+      {/if}
+    </div>
+    <p class="note">Dummy planner output over a Tauri Channel, binary sample batches checked against plan.done.</p>
+  </div>
+</aside>
+
+<style>
+  aside {
+    flex: 0 0 260px;
+    min-width: 220px;
+    border-left: 1px solid var(--line);
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    overflow-y: auto;
+  }
+  p {
+    margin: 6px 0 0;
+  }
+  .ok {
+    color: var(--ok);
+  }
+</style>

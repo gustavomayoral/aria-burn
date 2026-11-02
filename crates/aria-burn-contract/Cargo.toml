@@ -1,0 +1,23 @@
+[package]
+name = "aria-burn-contract"
+version = "0.1.0"
+description = "Rust side of the aria-burn v1 contract, generated from aria-burn-core's JSON Schema and sample-batch layout"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["serde", "std"] }
+regress = "0.12"
+serde.workspace = true
+serde_json.workspace = true
+
+[build-dependencies]
+prettyplease = "0.3"
+quote = "1"
+proc-macro2 = "1"
+schemars = "0.8"
+serde_json.workspace = true
+syn = "3"
+typify = "0.8"

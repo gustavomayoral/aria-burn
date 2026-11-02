@@ -1,0 +1,43 @@
+{
+  "name": "aria-burn",
+  "version": "0.1.0",
+  "description": "Laser Sim desktop app: Tauri shell and Svelte web UI",
+  "license": "GPL-3.0-or-later",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@9.15.9",
+  "engines": {
+    "node": ">=26 <27"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "tauri": "tauri",
+    "typecheck": "svelte-check --tsconfig ./tsconfig.json --fail-on-warnings",
+    "test": "vitest run",
+    "check": "pnpm typecheck && pnpm test && pnpm build && cargo test --workspace",
+    "smoke": "node scripts/smoke.mjs",
+    "wt:start": "node scripts/worktree.mjs start",
+    "wt:finish": "node scripts/worktree.mjs finish",
+    "wt:list": "node scripts/worktree.mjs list",
+    "mainline": "node scripts/worktree.mjs mainline",
+    "wrap": "node scripts/worktree.mjs wrap"
+  },
+  "dependencies": {
+    "aria-burn-core": "link:../aria-burn-core",
+    "@tauri-apps/api": "^2.12",
+    "@tauri-apps/plugin-store": "^2.5",
+    "three": "^0.187"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7",
+    "@tauri-apps/cli": "^2.12",
+    "@types/node": "^26",
+    "@types/three": "^0.187",
+    "svelte": "^5.57",
+    "svelte-check": "^4",
+    "typescript": "^5",
+    "vite": "^8",
+    "vitest": "^5"
+  }
+}

@@ -1,0 +1,23 @@
+[package]
+name = "aria-burn"
+version = "0.1.0"
+description = "Laser Sim: laser-engraver burn simulator"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+# The _lib suffix avoids a name clash with the binary on Windows (cargo#8519).
+name = "aria_burn_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7", features = [] }
+
+[dependencies]
+aria-burn-contract.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tauri = { version = "2.12", features = [] }
+tauri-plugin-store = "2.5"

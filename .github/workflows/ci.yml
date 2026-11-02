@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  # Every branch, so an issue branch is green before it is fast-forwarded into main.
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    # The app links aria-burn-core as a sibling directory (package.json `link:`,
+    # typify's schema path), so check both out side by side.
+    defaults:
+      run:
+        working-directory: aria-burn
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: aria-burn
+      - uses: actions/checkout@v5
+        with:
+          repository: gustavomayoral/aria-burn-core
+          ref: main
+          path: aria-burn-core
+
+      # Node 26 ships no corepack: pnpm comes from action-setup, version from packageManager.
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: aria-burn/package.json
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: aria-burn/.nvmrc
+          cache: pnpm
+          cache-dependency-path: |
+            aria-burn/pnpm-lock.yaml
+            aria-burn-core/pnpm-lock.yaml
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: aria-burn
+
+      - name: Install core dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: aria-burn-core
+      - run: pnpm install --frozen-lockfile
+
+      # svelte-check, vitest, vite build, cargo test (incl. the contract fixture round trip).
+      - run: pnpm check
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Build app (debug, no bundle)
+        run: pnpm tauri build --debug --no-bundle
+
+      # Rust → webview Channel round trip and throughput, in the real webview
+      # (WKWebView on macOS, WebView2 on Windows).
+      - name: IPC throughput smoke test
+        run: pnpm smoke
