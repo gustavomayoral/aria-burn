@@ -1,0 +1,14 @@
+[package]
+name = "aria-burn-gcode"
+version = "0.1.0"
+description = "GRBL laser G-code parser: file and streamed lines into the v1 contract's JobModel"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+aria-burn-contract.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

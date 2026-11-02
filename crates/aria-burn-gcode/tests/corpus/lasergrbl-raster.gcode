@@ -1,0 +1,16 @@
+G90 (use absolute coordinates)
+M3 S0
+G0 X0 Y0
+F1500
+G0 X2 Y1
+G1 X3 S120
+X4 S255
+X5 S60
+X6 S0
+G0 Y1.2
+G1 X5 S30
+X4 S200
+X3 S255
+X2 S0
+G0 X0 Y0 S0 (home)
+M5 S0

@@ -76,6 +76,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "aria-burn-gcode"
+version = "0.1.0"
+dependencies = [
+ "aria-burn-contract",
+ "serde_json",
+]
+
+[[package]]
 name = "atk"
 version = "0.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

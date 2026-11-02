@@ -14,6 +14,7 @@ The simulation core lives in the sibling repo [aria-burn-core](../aria-burn-core
   - `stream.rs` — dummy sample stream (stands in for the planner until COD-255)
   - `smoke.rs` — in-app IPC throughput smoke test
 - `crates/aria-burn-contract/` — Rust contract types, **generated** at build time from the core's `contract.schema.json` (typify) and `sample-batch-layout.json` (binary codec). Never write these by hand. `tests/fixtures.rs` round-trips every fixture in the core's `src/contract/fixtures/`.
+- `crates/aria-burn-gcode/` — GRBL laser G-code parser (COD-263): file bytes or a live byte stream → the contract's `JobModel`, with per-line GRBL `error:N` codes for the emulator. `tests/corpus/` holds the parser corpus.
 - `docs/design/` — design documents (COD-250)
 - `aria-burn.code-workspace` — opens this repo and `../aria-burn-core` in one editor window
 

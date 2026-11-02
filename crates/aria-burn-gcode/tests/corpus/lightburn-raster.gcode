@@ -1,0 +1,27 @@
+; LightBurn 1.7.08
+; GRBL device profile, absolute coords
+; Bounds: X10 Y10 to X14 Y10.3
+G00 G17 G40 G21 G54
+G90
+M4
+; Scan @ 3000 mm/min, 40% power
+M8
+G0 X10Y10
+G91
+G1 X1S400F3000
+G1 X2S200
+G1 X1S0
+G1 Y0.1
+G1 X-1S300
+G1 X-3S100
+G1 Y0.1S0
+G1 X4S400
+G1 Y0.1S0
+G1 X-4S250
+G90
+M9
+G1 S0
+M5
+G90
+G0 X0 Y0
+M2
