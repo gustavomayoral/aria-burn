@@ -13,7 +13,7 @@ use std::{
 };
 
 use aria_burn_contract::{
-    Event, JobModel, MachineProfile, PlanDoneEvent,
+    Event, JobModel, JobProgressEvent, MachineProfile, PlanDoneEvent,
     sample_batch::{MotionSample, SampleBatchHeader, decode_sample_batch},
 };
 use aria_burn_grbl::{ConnectionStatus, MachineConfig, Pacing, Server, ServerConfig, Sink, UiMessage};
@@ -83,7 +83,10 @@ impl Collect {
     }
 
     /// Batches of a job, checked: contiguous, one last flag, counts and energy
-    /// agree with plan.done (as the webview's StreamReceiver checks them).
+    /// agree with plan.done (as the webview's StreamReceiver checks them), and
+    /// the job's events come in the contract order:
+    /// job.streaming → plan.started → job.progress* → error? → job.loaded → plan.done,
+    /// each job.progress after the batches it counts.
     fn verified_job(&self, job_id: u32) -> (PlanDoneEvent, Vec<MotionSample>) {
         let done = self.plan_done(job_id);
         let batches: Vec<_> = self.batches().into_iter().filter(|(h, _)| h.job_id == job_id).collect();
@@ -96,7 +99,66 @@ impl Collect {
         assert_eq!(samples.len() as u32, done.sample_count);
         let energy: f64 = samples.iter().map(|s| s.power_w as f64 * s.dt_s as f64).sum();
         assert_eq!(energy, done.energy_j);
+
+        let mut kinds = String::new();
+        let mut batches_sent = 0u32;
+        let mut last_progress: Option<JobProgressEvent> = None;
+        for m in self.0.lock().unwrap().iter() {
+            let e = match m {
+                UiMessage::Batch(b) => {
+                    batches_sent += u32::from(decode_sample_batch(b).unwrap().0.job_id == job_id);
+                    continue;
+                }
+                UiMessage::Event(e) => e,
+                UiMessage::Connection(_) => continue,
+            };
+            kinds.push(match &**e {
+                Event::JobStreamingEvent(j) if j.job_id == job_id => 's',
+                Event::PlanStartedEvent(p) if p.job_id == job_id => 'p',
+                Event::JobProgressEvent(p) if p.job_id == job_id => {
+                    assert!(p.batch_count <= batches_sent, "job.progress ran ahead of the batches");
+                    if let Some(prev) = &last_progress {
+                        assert!(p.planned_s >= prev.planned_s && p.sample_count >= prev.sample_count);
+                        assert!(p.line_count >= prev.line_count);
+                    }
+                    last_progress = Some(p.clone());
+                    'g'
+                }
+                Event::ErrorEvent(e) if e.job_id == Some(job_id) => 'e',
+                Event::JobLoadedEvent(j) if j.job_id == job_id => 'l',
+                Event::PlanDoneEvent(d) if d.job_id == job_id => 'd',
+                _ => continue,
+            });
+        }
+        let body =
+            kinds.strip_prefix("sp").and_then(|k| k.strip_suffix("ld")).unwrap_or_else(|| panic!("order {kinds}"));
+        let body = body.strip_suffix('e').unwrap_or(body);
+        assert!(body.chars().all(|c| c == 'g'), "order {kinds}");
+        if let Some(p) = last_progress {
+            assert!(
+                p.planned_s <= done.duration_s && p.sample_count <= done.sample_count && p.energy_j <= done.energy_j
+            );
+        }
         (done, samples)
+    }
+
+    /// The job's progress events (verified_job checks their order).
+    fn progress(&self, job_id: u32) -> Vec<JobProgressEvent> {
+        self.events()
+            .into_iter()
+            .filter_map(|e| match e {
+                Event::JobProgressEvent(p) if p.job_id == job_id => Some(p),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The error code a job was closed with, if it was cut short.
+    fn abort_code(&self, job_id: u32) -> Option<String> {
+        self.events().into_iter().find_map(|e| match e {
+            Event::ErrorEvent(e) if e.job_id == Some(job_id) => Some(e.code.to_string()),
+            _ => None,
+        })
     }
 }
 
@@ -319,7 +381,18 @@ fn send_response_streaming_in_real_time() {
     let (done, samples) = sink.verified_job(1);
     // 6 rows × 10 mm at 100 mm/s plus moves: a fraction of a second, in real time.
     assert!(done.duration_s > 0.6 && done.duration_s < 3.0, "{}", done.duration_s);
-    assert!(started.elapsed().as_secs_f64() > done.duration_s * 0.9);
+    let wall = started.elapsed().as_secs_f64();
+    assert!(wall > done.duration_s * 0.9);
+    // Live progress while it streamed, at most JOB_PROGRESS_HZ = 10.
+    let progress = sink.progress(1);
+    assert!(!progress.is_empty() && progress.len() as f64 <= wall * 10.0 + 1.0, "{} in {wall}s", progress.len());
+    assert!(progress.last().unwrap().line_count > 0);
+    assert_eq!(sink.abort_code(1), None);
+    let streaming = sink.events().into_iter().find_map(|e| match e {
+        Event::JobStreamingEvent(j) => Some(j.name),
+        _ => None,
+    });
+    assert_eq!(streaming.as_deref(), Some("Network job 1"));
     // Samples cover the raster and carry their source lines.
     assert!(samples.iter().all(|s| (9.99..=20.01).contains(&s.x_mm) && (9.99..=10.6).contains(&s.y_mm)));
     // Every segment burns, except where M4 scales a row's first segment (a
@@ -328,6 +401,7 @@ fn send_response_streaming_in_real_time() {
     assert!(lines.iter().all(|&l| job[l as usize - 1].contains(" S")));
     assert!(lines.len() >= 6 * 19, "{}", lines.len());
     let model = sink.job_loaded(1);
+    assert_eq!(model.source.name, "Network job 1");
     assert_eq!(model.source.line_count as usize, job.len());
     assert_eq!(model.moves.len(), 6 * 21 + 1);
 }
@@ -418,6 +492,7 @@ fn hold_resume_and_reset() {
     // The reset closed the job; the preview keeps what was burned.
     let (done, samples) = sink.verified_job(1);
     assert!(done.duration_s > 0.1 && done.duration_s < 5.0, "{}", done.duration_s);
+    assert_eq!(sink.abort_code(1).as_deref(), Some("job-reset"));
     let max_x = samples.iter().map(|s| s.x_mm).fold(0.0, f32::max);
     assert!((max_x as f64 - alarm.pos.0).abs() < 0.5, "{max_x} vs {:?}", alarm.pos);
 
@@ -489,6 +564,7 @@ fn disconnect_mid_job_keeps_every_received_line() {
     assert_eq!(model.source.line_count, 60);
     let (_, samples) = sink.verified_job(1);
     assert_eq!(samples.last().unwrap().line, 60);
+    assert_eq!(sink.abort_code(1).as_deref(), Some("sender-disconnected"));
     assert!(done.duration_s > 0.0);
     sink.wait_for("listening again", |c| {
         matches!(c.connections().last(), Some(ConnectionStatus::Listening { .. })).then_some(())
@@ -500,6 +576,7 @@ fn disconnect_mid_job_keeps_every_received_line() {
     let replies = c.stream_send_response(&raster(1, 4, 3000));
     assert!(replies.iter().all(|r| r == "ok"));
     sink.verified_job(2);
+    assert_eq!(sink.abort_code(2), None, "a job that ended with M2 wasn't cut short");
 
     drop(c);
     server.stop();

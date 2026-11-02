@@ -8,8 +8,9 @@
   // stream progress and is not draggable yet.
   const live = $derived(app.source === 'live')
   // Live jobs: the length is known once plan.done arrives; until then the bar tracks the job clock.
-  const total = $derived(live ? (app.live?.done?.durationS ?? Math.max(preview.jobTimeS, app.machine?.tS ?? 0)) : TOTAL_S)
-  const elapsed = $derived(live ? (app.live?.done ? total : Math.max(preview.jobTimeS, app.machine?.tS ?? 0)) : preview.jobTimeS)
+  const liveClock = $derived(Math.max(preview.jobTimeS, app.machine?.tS ?? 0, app.live?.progress?.plannedS ?? 0))
+  const total = $derived(live ? (app.live?.done?.durationS ?? liveClock) : TOTAL_S)
+  const elapsed = $derived(live ? (app.live?.done ? total : liveClock) : preview.jobTimeS)
   const idle = $derived(live ? app.live === null : app.stream.state === 'idle')
   const progress = $derived(idle || total <= 0 ? 0 : Math.min(100, (elapsed / total) * 100))
   const running = $derived(app.stream.state === 'running')

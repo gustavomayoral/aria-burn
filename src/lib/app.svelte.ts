@@ -19,8 +19,11 @@ export interface LiveJob {
   jobId: number
   batches: number
   samples: number
-  /** From job.loaded, when the stream ends. */
+  /** From job.streaming. */
   name: string | null
+  /** Latest job.progress: running totals while it streams. */
+  progress: EventOf<'job.progress'> | null
+  /** From job.loaded, when the stream ends. */
   lineCount: number | null
   bounds: { widthMm: number; heightMm: number } | null
   /** From plan.done. */
@@ -101,7 +104,7 @@ class AppState {
     if (this.live?.jobId === jobId) return
     preview.reset()
     this.source = 'live'
-    this.live = { jobId, batches: 0, samples: 0, name: null, lineCount: null, bounds: null, done: null, errors: [] }
+    this.live = { jobId, batches: 0, samples: 0, name: null, progress: null, lineCount: null, bounds: null, done: null, errors: [] }
   }
 
   private onLiveEvent(msg: ChannelEvent) {
@@ -113,8 +116,18 @@ class AppState {
       case 'machine.status':
         this.machine = e
         break
+      case 'job.streaming':
+        this.beginLive(e.jobId)
+        this.live!.name = e.name
+        break
       case 'plan.started':
         this.beginLive(e.jobId)
+        break
+      case 'job.progress':
+        if (this.live?.jobId === e.jobId) {
+          this.live.progress = e
+          this.live.lineCount = e.lineCount
+        }
         break
       case 'job.loaded':
         if (this.live?.jobId === e.jobId) {

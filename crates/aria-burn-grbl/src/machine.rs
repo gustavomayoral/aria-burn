@@ -16,15 +16,19 @@
 //! Network jobs: a job opens with the first G-code line after the last job
 //! closed, and closes on M2/M30 once motion ends, on Ctrl-X, on disconnect, or
 //! after `job_idle_end_s` with nothing to do. The webview hears about a job only
-//! once its first beam-on sample exists (plan.started), so framing or jogging
-//! leaves the last preview in place; job.loaded and plan.done follow at close.
+//! once its first beam-on sample exists, so framing or jogging leaves the last
+//! preview in place. Then, per the contract: job.streaming → plan.started →
+//! batches with job.progress (≤ JOB_PROGRESS_HZ, each after the batches it
+//! counts) → [error, if cut short by Ctrl-X or a disconnect] → job.loaded →
+//! plan.done.
 
 use std::collections::{BTreeMap, VecDeque};
 
 use aria_burn_contract::{
-    ErrorEvent, ErrorEventCode, ErrorEventType, Event, JobLoadedEvent, JobLoadedEventType, JobModel, JobSourceKind,
-    LaserMode, MachineProfile, MachineState, MachineStatusEvent, MachineStatusEventType, PlanDoneEvent,
-    PlanDoneEventType, PlanStartedEvent, PlanStartedEventType, Vec2Mm,
+    ErrorEvent, ErrorEventCode, ErrorEventType, Event, JobLoadedEvent, JobLoadedEventType, JobModel, JobProgressEvent,
+    JobProgressEventType, JobSourceKind, JobStreamingEvent, JobStreamingEventType, LaserMode, MachineProfile,
+    MachineState, MachineStatusEvent, MachineStatusEventType, PlanDoneEvent, PlanDoneEventType, PlanStartedEvent,
+    PlanStartedEventType, Vec2Mm,
     sample_batch::{self, MotionSample, SAMPLE_BATCH_MAX_SAMPLES, SampleBatchHeader},
 };
 use aria_burn_gcode::{ParseOptions, Parser};
@@ -70,6 +74,8 @@ pub enum Output {
 const MAX_STEP_S: f64 = 0.25;
 /// Partial batches go out at least this often (s), so the preview builds live.
 const BATCH_FLUSH_S: f64 = 0.05;
+/// job.progress interval (s): contract JOB_PROGRESS_HZ = 10.
+const PROGRESS_S: f64 = 0.1;
 /// Status reports between WCO / Ov fields, as GRBL's refresh counters.
 const REPORT_REFRESH: u32 = 10;
 
@@ -85,26 +91,30 @@ enum GrblState {
 /// A network job being streamed.
 struct LiveJob {
     id: u32,
+    name: String,
     clock0: f64,
     started: bool,
     sequence: u32,
     buf: Vec<MotionSample>,
     t0: f64,
     batch_age_s: f64,
+    progress_age_s: f64,
     sample_count: u32,
     energy_j: f64,
 }
 
 impl LiveJob {
-    fn new(id: u32, clock0: f64) -> Self {
+    fn new(id: u32, name: String, clock0: f64) -> Self {
         Self {
             id,
+            name,
             clock0,
             started: false,
             sequence: 0,
             buf: Vec::new(),
             t0: 0.0,
             batch_age_s: 0.0,
+            progress_age_s: 0.0,
             sample_count: 0,
             energy_j: 0.0,
         }
@@ -113,6 +123,11 @@ impl LiveJob {
     fn push(&mut self, t: f64, mut s: MotionSample, profile: &MachineProfile, out: &mut Vec<Output>) {
         if !self.started {
             self.started = true;
+            out.push(event(Event::JobStreamingEvent(JobStreamingEvent {
+                type_: JobStreamingEventType::JobStreaming,
+                job_id: self.id,
+                name: self.name.clone(),
+            })));
             out.push(event(Event::PlanStartedEvent(PlanStartedEvent {
                 type_: PlanStartedEventType::PlanStarted,
                 job_id: self.id,
@@ -145,11 +160,39 @@ impl LiveJob {
         self.buf.clear();
     }
 
-    fn end(mut self, job: JobModel, clock: f64, out: &mut Vec<Output>) {
+    /// job.progress, after a flush so it never counts batches not yet sent.
+    fn progress(&mut self, clock: f64, line_count: u32, out: &mut Vec<Output>) {
+        self.progress_age_s = 0.0;
+        if !self.started {
+            return;
+        }
+        self.flush(false, out);
+        out.push(event(Event::JobProgressEvent(JobProgressEvent {
+            type_: JobProgressEventType::JobProgress,
+            job_id: self.id,
+            planned_s: clock - self.clock0,
+            line_count,
+            batch_count: self.sequence,
+            sample_count: self.sample_count,
+            energy_j: self.energy_j,
+        })));
+    }
+
+    /// Closes the job: last batch, then (if it was cut short) an error, then
+    /// job.loaded and plan.done for what was planned.
+    fn end(mut self, job: JobModel, clock: f64, abort: Option<Abort>, out: &mut Vec<Output>) {
         if !self.started {
             return;
         }
         self.flush(true, out);
+        if let Some(abort) = abort {
+            out.push(event(Event::ErrorEvent(ErrorEvent {
+                type_: ErrorEventType::Error,
+                code: ErrorEventCode::try_from(abort.code()).expect("non-empty"),
+                message: abort.message().into(),
+                job_id: Some(self.id),
+            })));
+        }
         out.push(event(Event::JobLoadedEvent(JobLoadedEvent {
             type_: JobLoadedEventType::JobLoaded,
             job_id: self.id,
@@ -163,6 +206,33 @@ impl LiveJob {
             sample_count: self.sample_count,
             energy_j: self.energy_j,
         })));
+    }
+}
+
+/// Why a job was cut short.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Abort {
+    Reset,
+    Disconnect,
+}
+
+impl Abort {
+    fn code(self) -> &'static str {
+        match self {
+            Abort::Reset => "job-reset",
+            Abort::Disconnect => "sender-disconnected",
+        }
+    }
+
+    fn message(self) -> &'static str {
+        match self {
+            Abort::Reset => {
+                "The sender reset the controller (Ctrl-X) mid-job; the preview shows what burned before the stop."
+            }
+            Abort::Disconnect => {
+                "The sender disconnected mid-job; the preview shows what it had sent (a held job stops where it was)."
+            }
+        }
     }
 }
 
@@ -273,6 +343,7 @@ impl Machine {
     /// GRBL would run its buffers, unless the job was held; then it stops there.
     /// Either way the job closes and the preview keeps what was burned.
     pub fn disconnect(&mut self) {
+        let abort = self.has_work().then_some(Abort::Disconnect);
         if !self.hold && !self.alarm {
             loop {
                 self.process_lines();
@@ -283,7 +354,7 @@ impl Machine {
             }
         }
         self.clear_motion();
-        self.close_job();
+        self.close_job_with(abort);
         self.hold = false;
         self.out.clear();
     }
@@ -332,7 +403,10 @@ impl Machine {
         self.process_lines();
         if let Some(job) = &mut self.job {
             job.batch_age_s += wall_dt_s;
-            if job.batch_age_s >= BATCH_FLUSH_S {
+            job.progress_age_s += wall_dt_s;
+            if job.progress_age_s >= PROGRESS_S {
+                job.progress(self.planner.clock_s(), self.parser.line_count(), &mut self.outputs);
+            } else if job.batch_age_s >= BATCH_FLUSH_S {
                 job.flush(false, &mut self.outputs);
             }
         }
@@ -491,12 +565,13 @@ impl Machine {
     /// while moving loses position on a real machine, so it raises ALARM:3.
     fn reset(&mut self) {
         let moving = !self.hold && matches!(self.state(), GrblState::Run | GrblState::Jog);
+        let abort = self.has_work().then_some(Abort::Reset);
         if moving {
             self.alarm = true;
             self.reply(&format!("ALARM:{}", protocol::ALARM_ABORT_CYCLE));
         }
         self.clear_motion();
-        self.close_job();
+        self.close_job_with(abort);
         self.rx.clear();
         self.hold = false;
         self.overrides = Overrides::default();
@@ -583,8 +658,9 @@ impl Machine {
         if self.job.is_none() {
             let id = self.next_job_id;
             self.next_job_id += 1;
-            self.parser.set_name(format!("Network job {id}"));
-            self.job = Some(LiveJob::new(id, self.planner.clock_s()));
+            let name = format!("Network job {id}");
+            self.parser.set_name(name.clone());
+            self.job = Some(LiveJob::new(id, name, self.planner.clock_s()));
         }
         let mut bytes = line.to_vec();
         bytes.push(b'\n');
@@ -735,12 +811,21 @@ impl Machine {
     }
 
     fn close_job(&mut self) {
+        self.close_job_with(None);
+    }
+
+    fn close_job_with(&mut self, abort: Option<Abort>) {
         self.end_job_when_idle = false;
         self.idle_s = 0.0;
         if let Some(job) = self.job.take() {
             let model = self.parser.take_job();
-            job.end(model, self.planner.clock_s(), &mut self.outputs);
+            job.end(model, self.planner.clock_s(), abort, &mut self.outputs);
         }
+    }
+
+    /// Motion queued or lines waiting: a job stopped now would be cut short.
+    fn has_work(&self) -> bool {
+        self.planner.queued() > 0 || !self.pending.is_empty() || self.rx.iter().any(|&b| b == b'\n' || b == b'\r')
     }
 }
 

@@ -18,7 +18,7 @@
   {/each}
   {#if live && live.errors.length}
     <div class="callout danger">
-      <strong>Live stream</strong>
+      <strong>Live job</strong>
       {#each live.errors.slice(0, 5) as e (e)}<span>{e}</span>{/each}
     </div>
   {/if}
@@ -62,7 +62,7 @@
     </div>
     {#if live}
       <div>
-        <div class="section-label">Live job {live.jobId}</div>
+        <div class="section-label">{live.name ?? `Live job ${live.jobId}`}</div>
         <div class="kv">
           <span>Batches</span><span>{live.batches.toLocaleString()}</span>
           <span>Samples</span><span>{live.samples.toLocaleString()}</span>
