@@ -1,0 +1,751 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+//! The emulated GRBL controller: bytes in from the sender, replies out, plus
+//! contract events and sample batches for the webview. No I/O and no clock of
+//! its own: the server feeds it bytes and wall time, tests drive it directly.
+//!
+//! Protocol model (GRBL 1.1):
+//! - Real-time bytes (`?` `!` `~` Ctrl-X, 0x80+ overrides) act the moment they
+//!   arrive, wherever they sit in the stream; everything else goes to the RX
+//!   buffer.
+//! - Lines run one at a time, in order. A motion line is answered `ok` once all
+//!   its moves are in the planner, so with real-time pacing a full planner
+//!   (15 blocks) holds back `ok`s, which is what paces both character-counting
+//!   and send-response senders. Instant pacing never fills the planner.
+//! - A rejected line gets `error:N` with the parser's GRBL code and changes nothing.
+//!
+//! Network jobs: a job opens with the first G-code line after the last job
+//! closed, and closes on M2/M30 once motion ends, on Ctrl-X, on disconnect, or
+//! after `job_idle_end_s` with nothing to do. The webview hears about a job only
+//! once its first beam-on sample exists (plan.started), so framing or jogging
+//! leaves the last preview in place; job.loaded and plan.done follow at close.
+
+use std::collections::{BTreeMap, VecDeque};
+
+use aria_burn_contract::{
+    ErrorEvent, ErrorEventCode, ErrorEventType, Event, JobLoadedEvent, JobLoadedEventType, JobModel, JobSourceKind,
+    LaserMode, MachineProfile, MachineState, MachineStatusEvent, MachineStatusEventType, PlanDoneEvent,
+    PlanDoneEventType, PlanStartedEvent, PlanStartedEventType, Vec2Mm,
+    sample_batch::{self, MotionSample, SAMPLE_BATCH_MAX_SAMPLES, SampleBatchHeader},
+};
+use aria_burn_gcode::{ParseOptions, Parser};
+
+use crate::planner::{Block, InterimPlanner, Overrides, Planner, SAMPLE_DT_MAX_S, grid_pitch_mm};
+use crate::protocol::{self, error, rt};
+
+/// When `ok`s go out.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Pacing {
+    /// Motion runs on the wall clock and a full planner holds back `ok`s, as on the machine.
+    #[default]
+    Realtime,
+    /// Every line is answered as soon as it is parsed and motion completes at once.
+    Instant,
+}
+
+#[derive(Clone, Debug)]
+pub struct MachineConfig {
+    pub pacing: Pacing,
+    pub profile: MachineProfile,
+    /// Wall time with nothing to do after which an open job closes (s).
+    pub job_idle_end_s: f64,
+}
+
+impl MachineConfig {
+    pub fn new(profile: MachineProfile) -> Self {
+        Self { pacing: Pacing::Realtime, profile, job_idle_end_s: 5.0 }
+    }
+}
+
+/// Something for the webview.
+#[derive(Clone, Debug)]
+pub enum Output {
+    Event(Box<Event>),
+    /// One encoded sample batch (contract sample-batch layout).
+    Batch(Vec<u8>),
+}
+
+/// Longest wall-clock step real-time motion takes at once, so a stalled thread
+/// (or a laptop waking up) doesn't jump the job forward.
+const MAX_STEP_S: f64 = 0.25;
+/// Partial batches go out at least this often (s), so the preview builds live.
+const BATCH_FLUSH_S: f64 = 0.05;
+/// Status reports between WCO / Ov fields, as GRBL's refresh counters.
+const REPORT_REFRESH: u32 = 10;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GrblState {
+    Idle,
+    Run,
+    Hold,
+    Jog,
+    Alarm,
+}
+
+/// A network job being streamed.
+struct LiveJob {
+    id: u32,
+    clock0: f64,
+    started: bool,
+    sequence: u32,
+    buf: Vec<MotionSample>,
+    t0: f64,
+    batch_age_s: f64,
+    sample_count: u32,
+    energy_j: f64,
+}
+
+impl LiveJob {
+    fn new(id: u32, clock0: f64) -> Self {
+        Self {
+            id,
+            clock0,
+            started: false,
+            sequence: 0,
+            buf: Vec::new(),
+            t0: 0.0,
+            batch_age_s: 0.0,
+            sample_count: 0,
+            energy_j: 0.0,
+        }
+    }
+
+    fn push(&mut self, t: f64, mut s: MotionSample, profile: &MachineProfile, out: &mut Vec<Output>) {
+        if !self.started {
+            self.started = true;
+            out.push(event(Event::PlanStartedEvent(PlanStartedEvent {
+                type_: PlanStartedEventType::PlanStarted,
+                job_id: self.id,
+                grid_pitch_mm: grid_pitch_mm(profile),
+                dt_max_s: SAMPLE_DT_MAX_S,
+            })));
+        }
+        let t_job = t - self.clock0;
+        if self.buf.is_empty() {
+            self.t0 = t_job;
+        }
+        s.t_rel_s = (t_job - self.t0) as f32;
+        // Same order and precision as the webview's check: f32 fields, f64 sum.
+        self.energy_j += s.power_w as f64 * s.dt_s as f64;
+        self.sample_count += 1;
+        self.buf.push(s);
+        if self.buf.len() == SAMPLE_BATCH_MAX_SAMPLES {
+            self.flush(false, out);
+        }
+    }
+
+    fn flush(&mut self, last: bool, out: &mut Vec<Output>) {
+        self.batch_age_s = 0.0;
+        if !self.started || (self.buf.is_empty() && !last) {
+            return;
+        }
+        let header = SampleBatchHeader { sequence: self.sequence, t0_s: self.t0, job_id: self.id, last };
+        out.push(Output::Batch(sample_batch::encode_sample_batch(&header, &self.buf)));
+        self.sequence += 1;
+        self.buf.clear();
+    }
+
+    fn end(mut self, job: JobModel, clock: f64, out: &mut Vec<Output>) {
+        if !self.started {
+            return;
+        }
+        self.flush(true, out);
+        out.push(event(Event::JobLoadedEvent(JobLoadedEvent {
+            type_: JobLoadedEventType::JobLoaded,
+            job_id: self.id,
+            job,
+        })));
+        out.push(event(Event::PlanDoneEvent(PlanDoneEvent {
+            type_: PlanDoneEventType::PlanDone,
+            job_id: self.id,
+            duration_s: clock - self.clock0,
+            batch_count: self.sequence,
+            sample_count: self.sample_count,
+            energy_j: self.energy_j,
+        })));
+    }
+}
+
+fn event(e: Event) -> Output {
+    Output::Event(Box::new(e))
+}
+
+pub struct Machine {
+    config: MachineConfig,
+    planner: Box<dyn Planner>,
+    parser: Parser,
+    /// Received line bytes not yet run (real-time bytes never land here).
+    rx: Vec<u8>,
+    /// Moves of the line being run that didn't fit in the planner yet.
+    pending: VecDeque<Block>,
+    /// The line being run is waiting for `pending` to drain before its `ok`.
+    pending_ok: bool,
+    /// Where the last queued move ends: the base for jogs.
+    target: (f64, f64),
+    /// The planner holds a jog (jogs and G-code lines never share it).
+    jogging: bool,
+    hold: bool,
+    alarm: bool,
+    overrides: Overrides,
+    overrides_reported: bool,
+    reports: u32,
+    /// `$x=` writes, over the defaults.
+    settings: BTreeMap<u16, f64>,
+    /// Last move queued, for `$G`.
+    last_move: Option<Block>,
+    job: Option<LiveJob>,
+    next_job_id: u32,
+    end_job_when_idle: bool,
+    idle_s: f64,
+    rx_overflowed: bool,
+    /// Bytes for the sender.
+    out: Vec<u8>,
+    /// Events and batches for the webview.
+    outputs: Vec<Output>,
+}
+
+impl Machine {
+    pub fn new(config: MachineConfig) -> Self {
+        let planner = Box::new(InterimPlanner::new(&config.profile));
+        Self::with_planner(config, planner)
+    }
+
+    /// With another planner behind the [`Planner`] interface (COD-255).
+    pub fn with_planner(config: MachineConfig, planner: Box<dyn Planner>) -> Self {
+        Self {
+            config,
+            planner,
+            parser: new_parser((0.0, 0.0)),
+            rx: Vec::new(),
+            pending: VecDeque::new(),
+            pending_ok: false,
+            target: (0.0, 0.0),
+            jogging: false,
+            hold: false,
+            alarm: false,
+            overrides: Overrides::default(),
+            overrides_reported: false,
+            reports: 0,
+            settings: BTreeMap::new(),
+            last_move: None,
+            job: None,
+            next_job_id: 1,
+            end_job_when_idle: false,
+            idle_s: 0.0,
+            rx_overflowed: false,
+            out: Vec::new(),
+            outputs: Vec::new(),
+        }
+    }
+
+    pub fn set_pacing(&mut self, pacing: Pacing) {
+        self.config.pacing = pacing;
+    }
+
+    pub fn set_profile(&mut self, profile: MachineProfile) {
+        self.planner.set_profile(&profile);
+        self.config.profile = profile;
+    }
+
+    /// Replies for the sender since the last call.
+    pub fn take_output(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.out)
+    }
+
+    /// Events and batches for the webview since the last call.
+    pub fn take_outputs(&mut self) -> Vec<Output> {
+        std::mem::take(&mut self.outputs)
+    }
+
+    /// A sender connected: power-up state (head stays put), then the banner.
+    pub fn connect(&mut self) {
+        self.close_job();
+        self.clear_motion();
+        self.alarm = false;
+        self.overrides = Overrides::default();
+        self.rx_overflowed = false;
+        self.reports = 0;
+        self.parser = new_parser(self.target);
+        self.out.extend_from_slice(protocol::BANNER.as_bytes());
+    }
+
+    /// The sender went away. Lines already received still run (instantly), as
+    /// GRBL would run its buffers, unless the job was held; then it stops there.
+    /// Either way the job closes and the preview keeps what was burned.
+    pub fn disconnect(&mut self) {
+        if !self.hold && !self.alarm {
+            loop {
+                self.process_lines();
+                self.run_motion(f64::INFINITY);
+                if self.pending.is_empty() && !self.rx.contains(&b'\n') && !self.rx.contains(&b'\r') {
+                    break;
+                }
+            }
+        }
+        self.clear_motion();
+        self.close_job();
+        self.hold = false;
+        self.out.clear();
+    }
+
+    /// Bytes from the sender.
+    pub fn receive(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            match b {
+                rt::STATUS => self.status_report(),
+                rt::HOLD => self.feed_hold(),
+                rt::RESUME => self.hold = false,
+                rt::RESET => self.reset(),
+                rt::JOG_CANCEL => self.jog_cancel(),
+                rt::FEED_100..=rt::SPINDLE_MINUS_1 => self.override_command(b),
+                // Safety door, coolant toggles and unknown extended codes: ignored.
+                0x80.. => {}
+                b'\n' | b'\r' => {
+                    self.rx.push(b);
+                    self.process_lines();
+                }
+                _ => self.rx.push(b),
+            }
+        }
+        if self.rx.len() > protocol::RX_BUFFER_SIZE && !self.rx_overflowed {
+            // Real GRBL would drop bytes here; the emulator keeps them but says so.
+            self.rx_overflowed = true;
+            self.outputs.push(event(Event::ErrorEvent(ErrorEvent {
+                type_: ErrorEventType::Error,
+                code: ErrorEventCode::try_from("rx-overflow").expect("non-empty"),
+                message: format!(
+                    "The sender has more than {} bytes unacknowledged; real GRBL would lose data. Check the sender's buffer settings.",
+                    protocol::RX_BUFFER_SIZE
+                ),
+                job_id: self.job.as_ref().map(|j| j.id),
+            })));
+        }
+    }
+
+    /// Advances by `wall_dt_s` of wall time: motion, `ok`s it unblocks, job close.
+    pub fn step(&mut self, wall_dt_s: f64) {
+        let dt = match self.config.pacing {
+            Pacing::Realtime => wall_dt_s.min(MAX_STEP_S),
+            Pacing::Instant => f64::INFINITY,
+        };
+        self.run_motion(dt);
+        self.process_lines();
+        if let Some(job) = &mut self.job {
+            job.batch_age_s += wall_dt_s;
+            if job.batch_age_s >= BATCH_FLUSH_S {
+                job.flush(false, &mut self.outputs);
+            }
+        }
+        let idle = self.job.is_some()
+            && !self.hold
+            && self.planner.queued() == 0
+            && self.pending.is_empty()
+            && !self.rx.iter().any(|&b| b == b'\n' || b == b'\r');
+        if idle {
+            self.idle_s += wall_dt_s;
+            if self.end_job_when_idle || self.idle_s >= self.config.job_idle_end_s {
+                self.close_job();
+            }
+        } else {
+            self.idle_s = 0.0;
+        }
+    }
+
+    /// machine.status for the webview (pushed at STATUS_PUSH_HZ by the server).
+    pub fn status_event(&self) -> Event {
+        let snap = self.planner.snapshot();
+        let state = match self.state() {
+            GrblState::Idle => MachineState::Idle,
+            GrblState::Run => MachineState::Run,
+            GrblState::Hold => MachineState::Hold,
+            GrblState::Jog => MachineState::Jog,
+            GrblState::Alarm => MachineState::Alarm,
+        };
+        let job = self.job.as_ref();
+        Event::MachineStatusEvent(MachineStatusEvent {
+            type_: MachineStatusEventType::MachineStatus,
+            state,
+            position_mm: Vec2Mm { x_mm: snap.position_mm.0, y_mm: snap.position_mm.1 },
+            feed_mm_per_min: snap.speed_mm_per_s * 60.0,
+            s: snap.s,
+            laser: snap.laser,
+            line: snap.line,
+            job_id: job.map(|j| j.id),
+            t_s: job.map_or(0.0, |j| (self.planner.clock_s() - j.clock0).max(0.0)),
+        })
+    }
+
+    fn state(&self) -> GrblState {
+        if self.alarm {
+            GrblState::Alarm
+        } else if self.hold {
+            GrblState::Hold
+        } else if self.planner.queued() > 0 || !self.pending.is_empty() {
+            if self.jogging { GrblState::Jog } else { GrblState::Run }
+        } else {
+            GrblState::Idle
+        }
+    }
+
+    fn setting(&self, n: u16) -> f64 {
+        if let Some(v) = self.settings.get(&n) {
+            return *v;
+        }
+        let p = &self.config.profile;
+        match n {
+            11 => p.junction_deviation_mm,
+            30 => p.s_max,
+            32 => f64::from(u8::from(p.laser_mode)),
+            110 => p.max_rate_mm_per_min.x,
+            111 => p.max_rate_mm_per_min.y,
+            120 => p.accel_mm_per_s2.x,
+            121 => p.accel_mm_per_s2.y,
+            130 => p.travel_mm.x,
+            131 => p.travel_mm.y,
+            _ => protocol::DEFAULT_SETTINGS.iter().find(|(k, _)| *k == n).map_or(0.0, |(_, v)| *v),
+        }
+    }
+
+    fn reply(&mut self, text: &str) {
+        self.out.extend_from_slice(text.as_bytes());
+        self.out.extend_from_slice(b"\r\n");
+    }
+
+    fn ok(&mut self) {
+        self.reply("ok");
+    }
+
+    fn error(&mut self, code: u8) {
+        self.reply(&format!("error:{code}"));
+    }
+
+    fn status_report(&mut self) {
+        let snap = self.planner.snapshot();
+        let state = match self.state() {
+            GrblState::Idle => "Idle",
+            GrblState::Run => "Run",
+            // Holds stop at once (no deceleration), so always complete.
+            GrblState::Hold => "Hold:0",
+            GrblState::Jog => "Jog",
+            GrblState::Alarm => "Alarm",
+        };
+        let mask = self.setting(10) as u32;
+        let (x, y) = snap.position_mm;
+        let pos = if mask & 1 != 0 { "MPos" } else { "WPos" };
+        let mut s = format!("<{state}|{pos}:{x:.3},{y:.3},0.000");
+        if mask & 2 != 0 {
+            let blocks = protocol::PLANNER_BLOCKS.saturating_sub(self.planner.queued());
+            let rx = protocol::RX_BUFFER_SIZE.saturating_sub(self.rx.len());
+            s += &format!("|Bf:{blocks},{rx}");
+        }
+        s += &format!("|FS:{:.0},{:.0}", snap.speed_mm_per_s * 60.0, snap.s);
+        if self.reports.is_multiple_of(REPORT_REFRESH) {
+            s += "|WCO:0.000,0.000,0.000";
+        } else if !self.overrides_reported || self.reports % REPORT_REFRESH == 1 {
+            let o = self.overrides;
+            s += &format!("|Ov:{},{},{}", o.feed, o.rapid, o.spindle);
+            self.overrides_reported = true;
+        }
+        s.push('>');
+        self.reports = self.reports.wrapping_add(1);
+        self.reply(&s);
+    }
+
+    fn feed_hold(&mut self) {
+        match self.state() {
+            GrblState::Jog => self.jog_cancel(),
+            GrblState::Alarm => {}
+            _ => self.hold = true,
+        }
+    }
+
+    fn jog_cancel(&mut self) {
+        if self.state() == GrblState::Jog {
+            self.clear_motion();
+        }
+    }
+
+    fn override_command(&mut self, b: u8) {
+        let o = &mut self.overrides;
+        let step = |v: u16, d: i32| (v as i32 + d).clamp(10, 200) as u16;
+        match b {
+            rt::FEED_100 => o.feed = 100,
+            rt::FEED_PLUS_10 => o.feed = step(o.feed, 10),
+            rt::FEED_MINUS_10 => o.feed = step(o.feed, -10),
+            rt::FEED_PLUS_1 => o.feed = step(o.feed, 1),
+            rt::FEED_MINUS_1 => o.feed = step(o.feed, -1),
+            rt::RAPID_100 => o.rapid = 100,
+            rt::RAPID_50 => o.rapid = 50,
+            rt::RAPID_25 => o.rapid = 25,
+            rt::SPINDLE_100 => o.spindle = 100,
+            rt::SPINDLE_PLUS_10 => o.spindle = step(o.spindle, 10),
+            rt::SPINDLE_MINUS_10 => o.spindle = step(o.spindle, -10),
+            rt::SPINDLE_PLUS_1 => o.spindle = step(o.spindle, 1),
+            rt::SPINDLE_MINUS_1 => o.spindle = step(o.spindle, -1),
+            _ => return,
+        }
+        self.overrides_reported = false;
+    }
+
+    /// Ctrl-X: stop now, drop every buffer, keep the head where it is. A reset
+    /// while moving loses position on a real machine, so it raises ALARM:3.
+    fn reset(&mut self) {
+        let moving = !self.hold && matches!(self.state(), GrblState::Run | GrblState::Jog);
+        if moving {
+            self.alarm = true;
+            self.reply(&format!("ALARM:{}", protocol::ALARM_ABORT_CYCLE));
+        }
+        self.clear_motion();
+        self.close_job();
+        self.rx.clear();
+        self.hold = false;
+        self.overrides = Overrides::default();
+        self.overrides_reported = false;
+        self.reports = 0;
+        // gc_init: modal state back to power-up defaults.
+        self.parser = new_parser(self.target);
+        self.out.extend_from_slice(protocol::BANNER.as_bytes());
+        if self.alarm {
+            self.out.extend_from_slice(protocol::UNLOCK_HINT.as_bytes());
+        }
+    }
+
+    /// Stops motion and drops queued moves; the head stays where it is.
+    fn clear_motion(&mut self) {
+        self.planner.stop();
+        self.pending.clear();
+        self.pending_ok = false;
+        self.end_job_when_idle = false;
+        self.target = self.planner.snapshot().position_mm;
+        self.parser.set_position(self.target);
+    }
+
+    fn run_motion(&mut self, dt: f64) {
+        if self.hold || self.alarm {
+            return;
+        }
+        let (job, outputs, profile) = (&mut self.job, &mut self.outputs, &self.config.profile);
+        self.planner.advance(dt, self.overrides, &mut |t, s| {
+            if let Some(job) = job.as_mut() {
+                job.push(t, s, profile, outputs);
+            }
+        });
+    }
+
+    /// Runs complete lines from RX while the planner has room.
+    fn process_lines(&mut self) {
+        loop {
+            self.queue_pending();
+            if !self.pending.is_empty() {
+                return;
+            }
+            let Some(end) = self.rx.iter().position(|&b| b == b'\n' || b == b'\r') else { return };
+            let line: Vec<u8> = self.rx.drain(..=end).take(end).collect();
+            self.run_line(&line);
+        }
+    }
+
+    fn planner_has_room(&self) -> bool {
+        self.config.pacing == Pacing::Instant || self.planner.queued() < protocol::PLANNER_BLOCKS
+    }
+
+    fn queue_pending(&mut self) {
+        while self.planner_has_room() {
+            let Some(block) = self.pending.pop_front() else { break };
+            self.planner.push(block);
+            self.target = (block.x_mm, block.y_mm);
+            self.jogging = block.jog;
+            if !block.jog {
+                self.last_move = Some(block);
+            }
+        }
+        if self.pending.is_empty() && self.pending_ok {
+            self.pending_ok = false;
+            self.ok();
+        }
+    }
+
+    fn run_line(&mut self, line: &[u8]) {
+        if protocol::stored_len(line) >= protocol::LINE_BUFFER_SIZE - 1 {
+            return self.error(error::OVERFLOW);
+        }
+        let text = String::from_utf8_lossy(line);
+        let trimmed = text.trim();
+        if let Some(cmd) = trimmed.strip_prefix('$') {
+            return self.system_command(cmd.trim());
+        }
+        if protocol::stored_len(line) == 0 {
+            return self.ok();
+        }
+        if matches!(self.state(), GrblState::Alarm | GrblState::Jog) {
+            return self.error(error::SYSTEM_GC_LOCK);
+        }
+        if self.job.is_none() {
+            let id = self.next_job_id;
+            self.next_job_id += 1;
+            self.parser.set_name(format!("Network job {id}"));
+            self.job = Some(LiveJob::new(id, self.planner.clock_s()));
+        }
+        let mut bytes = line.to_vec();
+        bytes.push(b'\n');
+        let result = self.parser.feed_bytes(&bytes).pop().expect("one complete line in, one outcome out");
+        match result {
+            Ok(range) => {
+                let moves = &self.parser.moves()[range];
+                self.pending.extend(moves.iter().map(Block::from_move));
+                if protocol::is_program_end(line) {
+                    self.end_job_when_idle = true;
+                }
+                self.pending_ok = true;
+                self.queue_pending();
+            }
+            Err(e) => self.error(e.grbl_error),
+        }
+    }
+
+    fn system_command(&mut self, cmd: &str) {
+        let state = self.state();
+        let upper = cmd.to_ascii_uppercase();
+        if let Some(jog) = upper.strip_prefix("J=") {
+            if !matches!(state, GrblState::Idle | GrblState::Jog) {
+                return self.error(error::IDLE_ERROR);
+            }
+            return match self.parse_jog(jog) {
+                Ok(block) => {
+                    self.close_job();
+                    self.pending.push_back(block);
+                    self.pending_ok = true;
+                    self.queue_pending();
+                    self.parser.set_position((block.x_mm, block.y_mm));
+                }
+                Err(code) => self.error(code),
+            };
+        }
+        match upper.as_str() {
+            "" => {
+                self.out.extend_from_slice(protocol::HELP.as_bytes());
+                self.ok()
+            }
+            "$" => {
+                if matches!(state, GrblState::Run | GrblState::Hold) {
+                    return self.error(error::IDLE_ERROR);
+                }
+                for &(n, _) in protocol::DEFAULT_SETTINGS {
+                    let v = self.setting(n);
+                    let line =
+                        if protocol::is_integer_setting(n) { format!("${n}={v:.0}") } else { format!("${n}={v:.3}") };
+                    self.reply(&line);
+                }
+                self.ok()
+            }
+            "G" => {
+                let m = self.last_move;
+                let motion = if m.is_some_and(|m| m.rapid) || m.is_none() { 0 } else { 1 };
+                let laser = match m.map(|m| m.laser) {
+                    Some(LaserMode::M3) => 3,
+                    Some(LaserMode::M4) => 4,
+                    _ => 5,
+                };
+                let (f, s) = m.map_or((0.0, 0.0), |m| (m.feed_mm_per_min, m.s));
+                self.reply(&format!("[GC:G{motion} G54 G17 G21 G90 G94 M{laser} M9 T0 F{f:.0} S{s:.0}]"));
+                self.ok()
+            }
+            "X" => {
+                if self.alarm {
+                    self.alarm = false;
+                    self.reply("[MSG:Caution: Unlocked]");
+                }
+                self.ok()
+            }
+            _ if !matches!(state, GrblState::Idle | GrblState::Alarm) => self.error(error::IDLE_ERROR),
+            "#" => {
+                self.out.extend_from_slice(protocol::OFFSETS_REPORT.as_bytes());
+                self.ok()
+            }
+            "I" => {
+                self.out.extend_from_slice(protocol::VERSION.as_bytes());
+                self.reply(&format!("[OPT:V,{},{}]", protocol::PLANNER_BLOCKS, protocol::RX_BUFFER_SIZE));
+                self.ok()
+            }
+            "N" => {
+                self.reply("$N0=");
+                self.reply("$N1=");
+                self.ok()
+            }
+            // Homing isn't emulated: the same answer as GRBL with $22=0.
+            "H" => self.error(error::SETTING_DISABLED),
+            _ => match self.parse_setting(&upper) {
+                Some((n, v)) => {
+                    self.settings.insert(n, v);
+                    self.ok()
+                }
+                None => self.error(error::INVALID_STATEMENT),
+            },
+        }
+    }
+
+    fn parse_setting(&self, cmd: &str) -> Option<(u16, f64)> {
+        let (n, v) = cmd.split_once('=')?;
+        let n: u16 = n.trim().parse().ok()?;
+        let v: f64 = v.trim().parse().ok()?;
+        protocol::DEFAULT_SETTINGS.iter().any(|(k, _)| *k == n).then_some((n, v))
+    }
+
+    /// `$J=` words: G20/G21, G90/G91, G53, X, Y, Z (ignored), F (required).
+    fn parse_jog(&self, words: &str) -> Result<Block, u8> {
+        let text: String = words.chars().filter(|c| !c.is_whitespace()).collect();
+        let (mut relative, mut inches) = (false, false);
+        let (mut x, mut y, mut feed) = (None, None, None);
+        let mut rest = text.as_str();
+        while let Some(letter) = rest.chars().next() {
+            rest = &rest[1..];
+            let end =
+                rest.find(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-' || c == '+')).unwrap_or(rest.len());
+            let value: f64 = rest[..end].parse().map_err(|_| error::INVALID_JOG_COMMAND)?;
+            rest = &rest[end..];
+            match (letter, value) {
+                ('G', 20.0) => inches = true,
+                ('G', 21.0) => inches = false,
+                ('G', 90.0 | 53.0) => relative = false,
+                ('G', 91.0) => relative = true,
+                ('X', v) => x = Some(v),
+                ('Y', v) => y = Some(v),
+                ('Z', _) => {}
+                ('F', v) => feed = Some(v),
+                _ => return Err(error::INVALID_JOG_COMMAND),
+            }
+        }
+        let feed = feed.filter(|f| *f > 0.0).ok_or(error::UNDEFINED_FEED_RATE)?;
+        let scale = if inches { 25.4 } else { 1.0 };
+        let axis = |word: Option<f64>, base: f64| match word {
+            None => base,
+            Some(v) if relative => base + v * scale,
+            Some(v) => v * scale,
+        };
+        Ok(Block {
+            x_mm: axis(x, self.target.0),
+            y_mm: axis(y, self.target.1),
+            feed_mm_per_min: feed * scale,
+            rapid: false,
+            s: 0.0,
+            laser: LaserMode::Off,
+            line: 0,
+            jog: true,
+        })
+    }
+
+    fn close_job(&mut self) {
+        self.end_job_when_idle = false;
+        self.idle_s = 0.0;
+        if let Some(job) = self.job.take() {
+            let model = self.parser.take_job();
+            job.end(model, self.planner.clock_s(), &mut self.outputs);
+        }
+    }
+}
+
+fn new_parser(start: (f64, f64)) -> Parser {
+    let mut p = Parser::new(JobSourceKind::Network, "Network job", ParseOptions::default());
+    p.set_position(start);
+    p
+}

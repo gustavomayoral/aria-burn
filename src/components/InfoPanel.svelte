@@ -8,12 +8,20 @@
   const pitchMm = $derived(Math.min(machine.spot.sigmaXMm, machine.spot.sigmaYMm) / 3)
   const tileMm = $derived(TILE_MAX_CELLS * pitchMm)
   const s = $derived(app.stream)
+  const live = $derived(app.source === 'live' ? app.live : null)
+  const m = $derived(app.machine)
 </script>
 
 <aside>
   {#each app.warnings as w (w)}
     <div class="callout warn"><strong>Settings</strong><span>{w}</span></div>
   {/each}
+  {#if live && live.errors.length}
+    <div class="callout danger">
+      <strong>Live stream</strong>
+      {#each live.errors.slice(0, 5) as e (e)}<span>{e}</span>{/each}
+    </div>
+  {/if}
   {#if s.state === 'error'}
     <div class="callout danger">
       <strong>Stream check failed</strong>
@@ -29,7 +37,11 @@
   <div>
     <div class="section-label">Job</div>
     <div class="kv">
-      <span>Bounds</span><span>{s.state === 'idle' ? '—' : '40.0 × 30.0 mm'}</span>
+      {#if app.source === 'live'}
+        <span>Bounds</span><span>{live?.bounds ? `${live.bounds.widthMm.toFixed(1)} × ${live.bounds.heightMm.toFixed(1)} mm` : '—'}</span>
+      {:else}
+        <span>Bounds</span><span>{s.state === 'idle' ? '—' : '40.0 × 30.0 mm'}</span>
+      {/if}
       <span>Grid pitch</span><span>{pitchMm.toFixed(3)} mm</span>
       <span>Tile size</span><span>{tileMm.toFixed(0)} mm</span>
       <span>Power mode</span><span>{machine.laserMode ? 'M4 (laser mode)' : 'M3'}</span>
@@ -37,6 +49,33 @@
     </div>
     <p class="note">Pitch = spot σ ÷ 3. Tiles hold at most 9000² cells.</p>
   </div>
+
+  {#if app.source === 'live'}
+    <div>
+      <div class="section-label">Machine</div>
+      <div class="kv">
+        <span>State</span><span>{m?.state ?? '—'}</span>
+        <span>Position</span><span>{m ? `${m.positionMm.xMm.toFixed(2)}, ${m.positionMm.yMm.toFixed(2)} mm` : '—'}</span>
+        <span>Feed</span><span>{m ? `${m.feedMmPerMin.toFixed(0)} mm/min` : '—'}</span>
+        <span>Line</span><span>{m && m.line > 0 ? m.line : '—'}</span>
+      </div>
+    </div>
+    {#if live}
+      <div>
+        <div class="section-label">Live job {live.jobId}</div>
+        <div class="kv">
+          <span>Batches</span><span>{live.batches.toLocaleString()}</span>
+          <span>Samples</span><span>{live.samples.toLocaleString()}</span>
+          {#if live.lineCount !== null}<span>Lines</span><span>{live.lineCount.toLocaleString()}</span>{/if}
+          {#if live.done}
+            <span>Duration</span><span>{live.done.durationS.toFixed(1)} s</span>
+            <span>Check</span>
+            {#if live.done.batchCount === live.batches && live.done.sampleCount === live.samples}<span class="ok">plan.done ✓</span>{:else}<span>{live.batches}/{live.done.batchCount} batches</span>{/if}
+          {/if}
+        </div>
+      </div>
+    {/if}
+  {/if}
 
   <div>
     <div class="section-label">Sample stream</div>

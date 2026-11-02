@@ -19,7 +19,9 @@
     if (smoke) {
       smokeRunning = true
       await smokeReport(await runSmoke(smoke))
+      return
     }
+    await app.startEmulator()
   })
 </script>
 

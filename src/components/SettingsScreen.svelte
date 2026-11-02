@@ -1,6 +1,7 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <script lang="ts">
   import { app } from '../lib/app.svelte.ts'
+  import { describeConnection } from '../lib/emulator.ts'
   import { machineProblems } from '../lib/settings.ts'
 
   const m = $derived(app.settings.machine)
@@ -47,6 +48,8 @@
     saveError = null
     try {
       await app.save()
+      // Restarts the emulator if the address changed; pacing and profile apply in place.
+      await app.applyEmulator()
       saved = true
       setTimeout(() => (saved = false), 1500)
     } catch (e) {
@@ -76,9 +79,13 @@
       <section>
         <div class="row-between">
           <h2>Network emulator</h2>
-          <span class="pill">Not implemented yet (COD-265)</span>
+          <span class="pill" class:on={app.connection.state === 'listening' || app.connection.state === 'connected'} class:bad={app.connection.state === 'failed'}>{describeConnection(app.connection)}</span>
         </div>
-        <p class="note">GRBL over TCP. In LightBurn or LaserGRBL, add a GRBL device with a Network connection pointed at the address below.</p>
+        <p class="note">GRBL over TCP. In LightBurn or LaserGRBL, add a GRBL device with a Network connection pointed at the address below. Changes apply when you save.</p>
+        <label class="check">
+          <input type="checkbox" bind:checked={net.listening} />
+          Listen for senders
+        </label>
         <div class="grid">
           <label>Bind address
             <select bind:value={net.bindMode}>
@@ -262,6 +269,14 @@
     border-radius: 999px;
     border: 1px solid var(--line-strong);
     color: var(--muted);
+  }
+  .pill.on {
+    color: var(--ok);
+    border-color: var(--ok);
+  }
+  .pill.bad {
+    color: var(--danger);
+    border-color: var(--danger);
   }
   .grid {
     display: grid;

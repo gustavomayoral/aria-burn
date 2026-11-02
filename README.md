@@ -11,10 +11,12 @@ The simulation core lives in the sibling repo [aria-burn-core](../aria-burn-core
   - `lib/stream-check.ts` — decodes sample batches with the core's decoder and checks them against `plan.done`
   - `lib/settings.ts` — persisted machine profile and UI preferences (`tauri-plugin-store`)
 - `src-tauri/` — the Rust shell
+  - `emulator.rs` — starts/stops the GRBL emulator from the network settings and forwards its traffic to the webview Channels
   - `stream.rs` — dummy sample stream (stands in for the planner until COD-255)
   - `smoke.rs` — in-app IPC throughput smoke test
 - `crates/aria-burn-contract/` — Rust contract types, **generated** at build time from the core's `contract.schema.json` (typify) and `sample-batch-layout.json` (binary codec). Never write these by hand. `tests/fixtures.rs` round-trips every fixture in the core's `src/contract/fixtures/`.
 - `crates/aria-burn-gcode/` — GRBL laser G-code parser (COD-263): file bytes or a live byte stream → the contract's `JobModel`, with per-line GRBL `error:N` codes for the emulator. `tests/corpus/` holds the parser corpus.
+- `crates/aria-burn-grbl/` — GRBL 1.1 network emulator (COD-265): TCP server for LightBurn / LaserGRBL, line protocol with GRBL-sized RX and planner buffers, real-time commands, placeholder `$` settings, and an interim trapezoid sampler behind a `Planner` trait that the planner port (COD-255) replaces. `tests/tcp.rs` drives it with scripted TCP senders.
 - `docs/design/` — design documents (COD-250)
 - `aria-burn.code-workspace` — opens this repo and `../aria-burn-core` in one editor window
 
@@ -29,6 +31,10 @@ pnpm check              # svelte-check, vitest, vite build, cargo test
 ```
 
 The contract crate reads the schema from `../aria-burn-core`; set `ARIA_BURN_CORE_DIR` to use another checkout.
+
+### GRBL emulator
+
+The app listens on `127.0.0.1:23` by default (Settings → Network emulator: bind address, port, pacing). In LightBurn, add a GRBL device with an Ethernet/TCP connection to that address; in LaserGRBL, use the Telnet protocol. **Real time** pacing answers `ok` as the emulated planner frees space, so the job takes as long as on the machine; **Instant** answers at once and the preview completes as fast as the sender streams.
 
 ### IPC
 

@@ -6,7 +6,12 @@
 
   // Scrub is placeholder until the core's scrub model (COD-264) lands: it shows
   // stream progress and is not draggable yet.
-  const progress = $derived(app.stream.state === 'idle' ? 0 : Math.min(100, (preview.jobTimeS / TOTAL_S) * 100))
+  const live = $derived(app.source === 'live')
+  // Live jobs: the length is known once plan.done arrives; until then the bar tracks the job clock.
+  const total = $derived(live ? (app.live?.done?.durationS ?? Math.max(preview.jobTimeS, app.machine?.tS ?? 0)) : TOTAL_S)
+  const elapsed = $derived(live ? (app.live?.done ? total : Math.max(preview.jobTimeS, app.machine?.tS ?? 0)) : preview.jobTimeS)
+  const idle = $derived(live ? app.live === null : app.stream.state === 'idle')
+  const progress = $derived(idle || total <= 0 ? 0 : Math.min(100, (elapsed / total) * 100))
   const running = $derived(app.stream.state === 'running')
 
   const fmt = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, '0')}`
@@ -16,7 +21,7 @@
   <button
     class="play"
     aria-label={running ? 'Streaming' : 'Stream dummy job'}
-    disabled={running || !isTauri()}
+    disabled={running || live || !isTauri()}
     onclick={() => app.runDemoStream()}
   >
     <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
@@ -28,7 +33,7 @@
     </svg>
   </button>
   <input type="range" min="0" max="100" step="0.5" value={progress} disabled aria-label="Job progress" />
-  <span class="label">{fmt(preview.jobTimeS)} / {fmt(TOTAL_S)}</span>
+  <span class="label">{fmt(elapsed)} / {live && !app.live?.done ? '…' : fmt(total)}</span>
 </div>
 
 <style>

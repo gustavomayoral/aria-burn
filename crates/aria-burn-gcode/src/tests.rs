@@ -184,6 +184,37 @@ fn feed_bytes_reports_each_completed_line() {
     assert_eq!(codes(&j), vec![("unsupported-command", 2), ("bad-number", 4)]);
 }
 
+#[test]
+fn take_job_splits_a_live_stream_and_keeps_modal_state() {
+    let mut p = Parser::new(JobSourceKind::Network, "live", ParseOptions::default());
+    p.feed_bytes(b"G91 M4 S300 F600\nG1 X5 Y5\nG20\nG1 X");
+    let first = p.take_job();
+    assert_eq!(ends(&first), vec![(5.0, 5.0)]);
+    assert_eq!(first.source.line_count, 3);
+    assert_eq!(codes(&first), vec![("unsupported-units", 3)]);
+
+    // The partial line, relative mode, M4/S/F and the position all carry over;
+    // so do inches, until G21. Line numbers and diagnostics start again.
+    p.feed_bytes(b"1\nG21\nG1 X1\n");
+    p.set_position((20.0, 0.0));
+    let second = p.finish();
+    assert_eq!(ends(&second), vec![(6.0, 5.0)]);
+    assert_eq!((second.start_mm.x_mm, second.start_mm.y_mm), (5.0, 5.0));
+    let m = &second.moves[0];
+    assert_eq!((m.laser, m.s, m.feed_mm_per_min, m.line), (LaserMode::M4, 300.0, 600.0, 3));
+    assert!(second.diagnostics.is_empty());
+}
+
+#[test]
+fn set_position_moves_the_start_of_an_empty_job() {
+    let mut p = Parser::new(JobSourceKind::Network, "live", ParseOptions::default());
+    p.set_position((7.0, 8.0));
+    p.feed_bytes(b"G91\nG0 X1\n");
+    assert_eq!(p.position(), (8.0, 8.0));
+    let j = p.finish();
+    assert_eq!((j.start_mm.x_mm, j.start_mm.y_mm), (7.0, 8.0));
+}
+
 mod passes {
     use super::*;
 

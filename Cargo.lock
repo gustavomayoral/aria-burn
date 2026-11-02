@@ -52,6 +52,7 @@ name = "aria-burn"
 version = "0.1.0"
 dependencies = [
  "aria-burn-contract",
+ "aria-burn-grbl",
  "serde",
  "serde_json",
  "tauri",
@@ -80,6 +81,16 @@ name = "aria-burn-gcode"
 version = "0.1.0"
 dependencies = [
  "aria-burn-contract",
+ "serde_json",
+]
+
+[[package]]
+name = "aria-burn-grbl"
+version = "0.1.0"
+dependencies = [
+ "aria-burn-contract",
+ "aria-burn-gcode",
+ "serde",
  "serde_json",
 ]
 

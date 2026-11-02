@@ -2,6 +2,8 @@
 // Placeholder preview: bins streamed samples' energy into a coarse grid so the
 // Color and Height views show the dummy stream arriving. The real deposit,
 // blur and response pipeline is the core's job (COD-264) and replaces this.
+// The grid is a fixed 60 × 50 mm window; live jobs centre it where they start
+// burning, so a job larger than that is clipped until COD-264's live tiling.
 
 import { SAMPLE_FIELD_COUNT, SAMPLE_FIELD_INDEX, type SampleBatchView } from 'aria-burn-core/contract'
 
@@ -23,8 +25,11 @@ export class Preview {
   /** Latest head position, for the canvas marker. */
   head = $state<{ xMm: number; yMm: number } | null>(null)
   jobTimeS = $state(0)
+  /** Machine area the grid covers; live jobs move it to where they burn. */
+  bounds = $state({ ...PREVIEW_BOUNDS_MM })
 
   reset() {
+    this.bounds = { ...PREVIEW_BOUNDS_MM }
     this.energy.fill(0)
     this.max = 0
     this.samples = 0
@@ -33,13 +38,23 @@ export class Preview {
     this.version++
   }
 
+  /** Centres the (empty) grid on a point, keeping its size. */
+  recenter(xMm: number, yMm: number) {
+    const w = PREVIEW_BOUNDS_MM.maxX - PREVIEW_BOUNDS_MM.minX
+    const h = PREVIEW_BOUNDS_MM.maxY - PREVIEW_BOUNDS_MM.minY
+    const minX = Math.round(xMm - w / 2)
+    const minY = Math.round(yMm - h / 2)
+    this.bounds = { minX, minY, maxX: minX + w, maxY: minY + h }
+  }
+
   add(b: SampleBatchView) {
     const { xMm, yMm, powerW, dtS, tRelS } = SAMPLE_FIELD_INDEX
+    const { minX, maxY } = this.bounds
     let max = this.max
     for (let i = 0; i < b.sampleCount; i++) {
       const o = i * SAMPLE_FIELD_COUNT
-      const cx = cell(b.f32[o + xMm]! - PREVIEW_BOUNDS_MM.minX)
-      const cy = cell(PREVIEW_BOUNDS_MM.maxY - b.f32[o + yMm]!)
+      const cx = cell(b.f32[o + xMm]! - minX)
+      const cy = cell(maxY - b.f32[o + yMm]!)
       if (cx < 0 || cy < 0 || cx >= this.width || cy >= this.height) continue
       const k = cy * this.width + cx
       const v = (this.energy[k]! += b.f32[o + powerW]! * b.f32[o + dtS]!)

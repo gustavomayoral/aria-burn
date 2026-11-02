@@ -2,7 +2,7 @@
 <script lang="ts">
   import { app } from '../lib/app.svelte.ts'
   import { findMaterial, labToRgb, markColor } from '../lib/materials.ts'
-  import { PREVIEW_BOUNDS_MM, PREVIEW_PITCH_MM, preview } from '../lib/preview.svelte.ts'
+  import { PREVIEW_PITCH_MM, preview } from '../lib/preview.svelte.ts'
 
   let { zoom }: { zoom: number } = $props()
 
@@ -49,17 +49,19 @@
     const cy = Math.floor(((e.clientY - r.top) / r.height) * preview.height)
     if (cx < 0 || cy < 0 || cx >= preview.width || cy >= preview.height) return (hover = null)
     hover = {
-      xMm: PREVIEW_BOUNDS_MM.minX + (cx + 0.5) * PREVIEW_PITCH_MM,
-      yMm: PREVIEW_BOUNDS_MM.maxY - (cy + 0.5) * PREVIEW_PITCH_MM,
+      xMm: preview.bounds.minX + (cx + 0.5) * PREVIEW_PITCH_MM,
+      yMm: preview.bounds.maxY - (cy + 0.5) * PREVIEW_PITCH_MM,
       energy: preview.energy[cy * preview.width + cx]!,
     }
   }
 
   const headStyle = $derived.by(() => {
-    const h = preview.head
-    if (!h || app.stream.state !== 'running') return null
-    const x = ((h.xMm - PREVIEW_BOUNDS_MM.minX) / (PREVIEW_BOUNDS_MM.maxX - PREVIEW_BOUNDS_MM.minX)) * 100
-    const y = ((PREVIEW_BOUNDS_MM.maxY - h.yMm) / (PREVIEW_BOUNDS_MM.maxY - PREVIEW_BOUNDS_MM.minY)) * 100
+    const live = app.source === 'live' && app.live !== null && app.live.done === null
+    const h = live && app.machine ? app.machine.positionMm : preview.head
+    if (!h || (app.stream.state !== 'running' && !live)) return null
+    const b = preview.bounds
+    const x = ((h.xMm - b.minX) / (b.maxX - b.minX)) * 100
+    const y = ((b.maxY - h.yMm) / (b.maxY - b.minY)) * 100
     return `left:${x}%;top:${y}%`
   })
 

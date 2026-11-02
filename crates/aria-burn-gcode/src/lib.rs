@@ -216,6 +216,15 @@ impl Parser {
             let line = std::mem::take(&mut self.pending);
             let _ = self.feed_raw(&line);
         }
+        self.take_job()
+    }
+
+    /// Ends the current job on a live stream and starts the next one: builds the
+    /// model of the lines fed since the last call, then resets the per-job
+    /// state (moves, diagnostics, line count). Modal state, head position and
+    /// the G92 offset carry over, as they do on the machine, and the next job
+    /// starts where this one ended. A partial line waits for more bytes.
+    pub fn take_job(&mut self) -> JobModel {
         let (passes, repeated) = passes::split(&self.moves, std::mem::take(&mut self.markers));
         if let Some((line, count)) = repeated {
             self.warn(
@@ -227,16 +236,40 @@ impl Parser {
             );
         }
         let (bounds, burn_bounds) = self.bounds();
-        JobModel {
+        let job = JobModel {
             contract_version: 1.0.try_into().expect("contract version 1"),
-            source: JobSource { kind: self.kind, name: self.name, line_count: self.line },
+            source: JobSource { kind: self.kind, name: self.name.clone(), line_count: self.line },
             start_mm: Vec2Mm { x_mm: self.opts.start_mm.0, y_mm: self.opts.start_mm.1 },
-            moves: self.moves,
+            moves: std::mem::take(&mut self.moves),
             passes,
             bounds,
             burn_bounds,
-            diagnostics: self.diagnostics,
+            diagnostics: std::mem::take(&mut self.diagnostics),
+        };
+        self.line = 0;
+        self.warned.clear();
+        self.errors = 0;
+        self.opts.start_mm = self.pos;
+        job
+    }
+
+    /// Moves the head without a G-code move (the emulator's jogs and resets),
+    /// so later relative moves start from the right place.
+    pub fn set_position(&mut self, (x_mm, y_mm): (f64, f64)) {
+        self.pos = (x_mm, y_mm);
+        if self.moves.is_empty() {
+            self.opts.start_mm = self.pos;
         }
+    }
+
+    /// Head position after the last parsed move.
+    pub fn position(&self) -> (f64, f64) {
+        self.pos
+    }
+
+    /// Renames the job being parsed (the emulator names network jobs as they start).
+    pub fn set_name(&mut self, name: impl Into<String>) {
+        self.name = name.into();
     }
 
     fn bounds(&self) -> (BoundsMm, Option<BoundsMm>) {

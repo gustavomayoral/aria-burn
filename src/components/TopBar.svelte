@@ -1,15 +1,22 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <script lang="ts">
   import { app } from '../lib/app.svelte.ts'
-
-  // Placeholder until the G-code parser (COD-263) and GRBL emulator (COD-265) land.
-  let source = $state<'file' | 'live'>('file')
+  import { describeConnection } from '../lib/emulator.ts'
 
   const status = $derived.by(() => {
+    if (app.source === 'live') {
+      const c = app.connection
+      const m = app.machine
+      const live = app.live
+      if (c.state !== 'connected') return describeConnection(c)
+      const job = live && !live.done ? ` · job ${live.jobId}, ${live.samples.toLocaleString()} samples` : ''
+      const line = m && m.line > 0 ? ` · line ${m.line}` : ''
+      return `${describeConnection(c)} · ${m?.state ?? 'Idle'}${line}${job}`
+    }
     const s = app.stream
     if (s.state === 'running') return `Streaming dummy job… ${s.batches} batches`
     if (s.state === 'done') return `Dummy job · ${s.samples.toLocaleString()} samples`
-    return source === 'file' ? 'No job loaded' : 'Emulator not running (COD-265)'
+    return 'No job loaded'
   })
 </script>
 
@@ -19,10 +26,10 @@
     <span>LaserSim</span>
   </div>
   <div class="seg" role="group" aria-label="Job source">
-    <button aria-pressed={source === 'file'} onclick={() => (source = 'file')}>File</button>
-    <button aria-pressed={source === 'live'} onclick={() => (source = 'live')}>Live (GRBL)</button>
+    <button aria-pressed={app.source === 'file'} onclick={() => (app.source = 'file')}>File</button>
+    <button aria-pressed={app.source === 'live'} onclick={() => (app.source = 'live')}>Live (GRBL)</button>
   </div>
-  <div class="status">{status}</div>
+  <div class="status" class:danger={app.source === 'live' && app.connection.state === 'failed'}>{status}</div>
   <button class="icon" aria-label="Connection, laser and machine settings" onclick={() => (app.screen = 'settings')}>
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
       <circle cx="12" cy="12" r="3" />
@@ -63,6 +70,9 @@
     color: var(--muted);
     font-size: 12px;
     text-align: right;
+  }
+  .status.danger {
+    color: var(--danger);
   }
   .icon {
     width: 36px;

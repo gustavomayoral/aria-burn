@@ -13,7 +13,7 @@
   let zoomIndex = $state(2)
 
   const ui = $derived(app.settings.ui)
-  const hasJob = $derived(app.stream.state !== 'idle')
+  const hasJob = $derived(app.source === 'live' ? app.live !== null : app.stream.state !== 'idle')
 
   function setPref<K extends keyof typeof ui>(key: K, value: (typeof ui)[K]) {
     app.settings.ui[key] = value
@@ -44,9 +44,14 @@
   {#if !hasJob}
     <div class="empty">
       <div class="card">
-        <strong>Open a G-code job</strong>
-        <p class="note">Drop a .gcode file here, or switch to Live to receive jobs from LightBurn or LaserGRBL. (G-code parsing lands in COD-263.)</p>
-        <button class="btn primary" onclick={() => app.runDemoStream()} disabled={!isTauri()}>Stream dummy job</button>
+        {#if app.source === 'live'}
+          <strong>Waiting for a job</strong>
+          <p class="note">Point LightBurn or LaserGRBL at the emulator (Settings → Network emulator) and start a job; the preview builds as it burns.</p>
+        {:else}
+          <strong>Open a G-code job</strong>
+          <p class="note">Drop a .gcode file here, or switch to Live to receive jobs from LightBurn or LaserGRBL.</p>
+          <button class="btn primary" onclick={() => app.runDemoStream()} disabled={!isTauri()}>Stream dummy job</button>
+        {/if}
         {#if !isTauri()}<p class="note">Run inside the desktop app (<code>pnpm tauri dev</code>) to stream from Rust.</p>{/if}
       </div>
     </div>
@@ -67,8 +72,10 @@
       <button class="btn" onclick={() => (zoomIndex = 2)}>Fit</button>
     </div>
   {/if}
-  {#if app.stream.state === 'running'}
+  {#if app.source === 'file' && app.stream.state === 'running'}
     <div class="chip" role="status"><span class="dot"></span>Rendering · {app.stream.batches} batches</div>
+  {:else if app.source === 'live' && app.live && !app.live.done}
+    <div class="chip" role="status"><span class="dot"></span>Live · {app.live.batches} batches</div>
   {/if}
 </div>
 
