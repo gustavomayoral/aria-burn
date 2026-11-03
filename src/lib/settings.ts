@@ -38,7 +38,7 @@ export function defaultSettings(): Settings {
   return {
     version: SETTINGS_VERSION,
     machine: structuredClone(defaultMachine) as Machine,
-    network: { bindMode: 'localhost', port: 23, pacing: 'realtime', listening: true },
+    network: { bindMode: 'localhost', port: 2323, pacing: 'realtime', listening: true },
     ui: { viewMode: 'color', verdictOverlay: false, relief: true, materialId: 'birch-ply-provisional' },
   }
 }

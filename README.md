@@ -35,7 +35,7 @@ The contract crate reads the schema from `../aria-burn-core`; set `ARIA_BURN_COR
 
 ### GRBL emulator
 
-The app listens on `127.0.0.1:23` by default (Settings → Network emulator: bind address, port, pacing). In LightBurn, add a GRBL device with an Ethernet/TCP connection to that address; in LaserGRBL, use the Telnet protocol. **Real time** pacing answers `ok` as the emulated planner frees space, so the job takes as long as on the machine; **Instant** answers at once and the preview completes as fast as the sender streams.
+The app listens on `127.0.0.1:2323` by default (Settings → Network emulator: bind address, port, pacing; ports below 1024, such as GRBL's usual 23, need admin rights on macOS and Linux). In LightBurn, add a GRBL device with an Ethernet/TCP connection to that address; in LaserGRBL, use the Telnet protocol. **Real time** pacing answers `ok` as the emulated planner frees space, so the job takes as long as on the machine; **Instant** answers at once and the preview completes as fast as the sender streams.
 
 ### IPC
 

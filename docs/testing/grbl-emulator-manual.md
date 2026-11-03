@@ -15,11 +15,11 @@ Watch three places while testing:
 ## 0. Setup
 1. Start the app with `pnpm tauri dev`, or run a debug build.
 2. Open Settings → Network emulator. Set **Listen for senders** on, Bind address **Localhost only**, Port **23**, Pacing **Real time**. Click **Save**.
-3. The pill should read `Listening on 127.0.0.1:23`. If it shows an error, use port 2323 and use that port everywhere below.
+3. The pill should read `Listening on 127.0.0.1:2323`. If your Settings still say port 23 (from an older build), change it to 2323 and Save: macOS and Linux deny ports below 1024 to normal users.
 4. Switch the top bar to **Live (GRBL)**.
 
 ## 1. LightBurn: connect and handshake
-1. In Devices, choose *Create Manually* → **GRBL** → **Ethernet/TCP**, address `127.0.0.1`, port `23`. Set the origin to front-left, matching your real machine.
+1. In Devices, choose *Create Manually* → **GRBL** → **Ethernet/TCP**, address `127.0.0.1`, port `2323`. Set the origin to front-left, matching your real machine.
 2. Connect. Expected:
    - the console shows `Grbl 1.1h ['$' for help]`;
    - LightBurn reports *Ready*;
@@ -60,7 +60,7 @@ Watch three places while testing:
 3. While LightBurn is connected, try to connect LaserGRBL. The connection is refused, and LightBurn keeps working.
 
 ## 6. LaserGRBL (Windows)
-1. *Grbl → Settings*: set the protocol to **Telnet** and the address to `127.0.0.1:23`, then connect. The banner shows. LaserGRBL may send a soft reset (Ctrl-X) on connect, which is fine.
+1. *Grbl → Settings*: set the protocol to **Telnet** and the address to `127.0.0.1:2323`, then connect. The banner shows. LaserGRBL may send a soft reset (Ctrl-X) on connect, which is fine.
 2. Repeat section 2 (one raster and one vector job) twice: once with streaming mode **Buffered** and once with **Synchronous**.
 3. Use the feed and power **override** sliders during a job.
    - Feed changes apply from the next move.
@@ -70,7 +70,7 @@ Watch three places while testing:
 6. Open *Grbl Configuration*. It reads `$$`. Writing settings returns `ok`, but only `$10` changes behaviour until COD-255.
 
 ## 7. Network and errors
-1. Set Bind address to **All interfaces**, Save, and accept the OS firewall prompt. Connect LightBurn from another machine to `<this machine's LAN IP>:23` and run a small job.
+1. Set Bind address to **All interfaces**, Save, and accept the OS firewall prompt. Connect LightBurn from another machine to `<this machine's LAN IP>:2323` and run a small job.
 2. Set the port to one another program already uses, such as one bound by `nc -l 2323`. The pill shows the error, and the app keeps running.
 3. Turn **Listen for senders** off and Save. The pill reads `Emulator off`, and LightBurn can't connect.
 

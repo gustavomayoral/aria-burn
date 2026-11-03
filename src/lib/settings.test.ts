@@ -16,19 +16,19 @@ describe('settings', () => {
     const { settings, warnings } = mergeSettings({
       version: SETTINGS_VERSION,
       machine,
-      network: { port: 2323 },
+      network: { port: 8023 },
       ui: { viewMode: 'height', unknownKey: true },
     })
     expect(warnings).toEqual([])
     expect(settings.machine.opticalPowerW).toBe(5.5)
-    expect(settings.network).toEqual({ ...defaultSettings().network, port: 2323 })
+    expect(settings.network).toEqual({ ...defaultSettings().network, port: 8023 })
     expect(settings.ui.viewMode).toBe('height')
     expect(settings.ui).not.toHaveProperty('unknownKey')
   })
 
   it('ignores values of the wrong type', () => {
     const { settings } = mergeSettings({ version: SETTINGS_VERSION, network: { port: '23' }, ui: { relief: 'yes' } })
-    expect(settings.network.port).toBe(23)
+    expect(settings.network.port).toBe(defaultSettings().network.port)
     expect(settings.ui.relief).toBe(true)
   })
 
