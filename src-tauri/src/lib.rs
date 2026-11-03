@@ -2,6 +2,7 @@
 //! Laser Sim desktop shell. Owns the machine side (G-code parser, GRBL
 //! emulator and planner) and streams to the webview over Tauri Channels.
 
+mod bench;
 mod emulator;
 mod job;
 mod smoke;
@@ -33,8 +34,15 @@ pub fn run() {
     if let Some(mode) = &smoke {
         mode.start_watchdog();
     }
+    let bench_url = bench::url_from_env();
     tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::default().build())
+        .setup(move |app| {
+            if let Some(url) = bench_url.clone() {
+                bench::open(app, url)?;
+            }
+            Ok(())
+        })
         .manage(smoke)
         .manage(Arc::new(emulator::EmulatorState::default()))
         .manage(Arc::new(job::JobState::default()))
