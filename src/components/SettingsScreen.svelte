@@ -202,17 +202,17 @@
     align-items: center;
     justify-content: space-between;
     padding: 8px 20px;
-    border-bottom: 1px solid var(--line);
+    border-bottom: 1px solid var(--line-subtle);
   }
   .brand {
     display: flex;
     align-items: center;
     gap: 10px;
-    font-size: 15px;
+    font-size: var(--text-md);
     font-weight: 600;
   }
   .crumb {
-    color: var(--muted);
+    color: var(--fg-muted);
     font-weight: 400;
   }
   .logo {
@@ -235,7 +235,7 @@
   }
   section {
     background: var(--panel);
-    border: 1px solid var(--line-strong);
+    border: 1px solid var(--line);
     border-radius: 12px;
     padding: 18px 20px;
     display: flex;
@@ -244,7 +244,7 @@
   }
   h2 {
     margin: 0;
-    font-size: 15px;
+    font-size: var(--text-md);
   }
   .note {
     margin: 0;
@@ -255,19 +255,19 @@
     align-items: center;
   }
   .pill {
-    font-size: 11px;
+    font-size: var(--text-2xs);
     padding: 3px 8px;
     border-radius: 999px;
-    border: 1px solid var(--line-strong);
-    color: var(--muted);
+    border: 1px solid var(--line);
+    color: var(--fg-muted);
   }
   .pill.on {
     color: var(--ok);
     border-color: var(--ok);
   }
   .pill.bad {
-    color: var(--danger);
-    border-color: var(--danger);
+    color: var(--danger-text);
+    border-color: var(--danger-text);
   }
   .grid {
     display: grid;
@@ -279,8 +279,8 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
-    font-size: 12px;
-    color: var(--text-2);
+    font-size: var(--text-xs);
+    color: var(--fg);
   }
   .check {
     flex-direction: row;
@@ -289,8 +289,8 @@
   input[type='number'],
   select,
   textarea {
-    background: var(--bg);
-    border: 1px solid var(--line-strong);
+    background: var(--bed);
+    border: 1px solid var(--line);
     border-radius: 6px;
     padding: 7px 9px;
     min-width: 0;
@@ -310,13 +310,13 @@
     width: 0;
   }
   .hint {
-    color: var(--faint);
-    font-size: 11px;
+    color: var(--fg-faint);
+    font-size: var(--text-2xs);
   }
   code {
-    font-family: var(--mono);
-    font-size: 11px;
-    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: var(--text-2xs);
+    color: var(--fg-muted);
   }
   .row {
     display: flex;

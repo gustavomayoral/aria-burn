@@ -66,14 +66,14 @@
     align-items: center;
     gap: 14px;
     padding: 12px 20px;
-    border-top: 1px solid var(--line);
+    border-top: 1px solid var(--line-subtle);
     flex-wrap: wrap;
   }
   .play {
     width: 36px;
     height: 36px;
     border-radius: 50%;
-    border: 1px solid var(--line-strong);
+    border: 1px solid var(--line);
     background: var(--panel);
     display: grid;
     place-items: center;
@@ -94,7 +94,7 @@
     height: 4px;
     transform: translateY(-50%);
     border-radius: 2px;
-    background: rgba(232, 121, 61, 0.35);
+    background: var(--accent-track);
     pointer-events: none;
   }
   input[type='range'] {
@@ -103,9 +103,9 @@
     accent-color: var(--accent);
   }
   .label {
-    font-family: var(--mono);
-    font-size: 12px;
-    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--fg-muted);
     min-width: 150px;
     text-align: right;
     white-space: nowrap;
@@ -114,8 +114,8 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 12px;
-    color: var(--text-2);
+    font-size: var(--text-xs);
+    color: var(--fg);
     min-height: 32px;
   }
 </style>

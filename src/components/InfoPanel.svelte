@@ -211,7 +211,7 @@
   aside {
     flex: 0 0 260px;
     min-width: 220px;
-    border-left: 1px solid var(--line);
+    border-left: 1px solid var(--line-subtle);
     padding: 18px;
     display: flex;
     flex-direction: column;
@@ -220,9 +220,9 @@
   }
   p {
     margin: 8px 0 0;
-    font-size: 11px;
+    font-size: var(--text-2xs);
     line-height: 1.45;
-    color: var(--faint);
+    color: var(--fg-faint);
   }
   .banner {
     border: 1px solid;
@@ -231,36 +231,36 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
-    font-size: 11px;
+    font-size: var(--text-2xs);
     line-height: 1.45;
   }
   .banner strong {
-    font-size: 12px;
+    font-size: var(--text-xs);
   }
   .banner.fire {
-    border-color: rgba(214, 51, 108, 0.55);
-    background: rgba(214, 51, 108, 0.1);
-    color: #e6b3c4;
+    border-color: var(--fire-border);
+    background: var(--fire-soft);
+    color: var(--fire-muted);
   }
   .banner.fire strong,
   .banner.fire .go {
-    color: #f5a3c0;
+    color: var(--fire-text);
   }
   .banner.amber {
-    border-color: rgba(224, 169, 64, 0.5);
-    background: rgba(224, 169, 64, 0.08);
-    color: #d8c39a;
+    border-color: var(--warn-border);
+    background: var(--warn-soft);
+    color: var(--warn-muted);
   }
   .banner.amber strong {
-    color: #e8c57f;
+    color: var(--warn-text);
   }
   .banner.red {
-    border-color: rgba(229, 72, 77, 0.5);
-    background: rgba(229, 72, 77, 0.08);
-    color: #d79a9c;
+    border-color: var(--danger-border);
+    background: var(--danger-soft);
+    color: var(--danger-muted);
   }
   .banner.red strong {
-    color: var(--danger);
+    color: var(--danger-text);
   }
   .head {
     display: flex;
@@ -270,8 +270,8 @@
   .x {
     border: 0;
     background: none;
-    color: var(--muted);
-    font-size: 16px;
+    color: var(--fg-muted);
+    font-size: var(--text-lg);
     line-height: 1;
     min-width: 28px;
     min-height: 28px;
@@ -281,9 +281,9 @@
     min-height: 30px;
     padding: 0 10px;
     border-radius: 6px;
-    border: 1px solid rgba(214, 51, 108, 0.55);
+    border: 1px solid var(--fire-border);
     background: transparent;
-    font-size: 12px;
+    font-size: var(--text-xs);
   }
   .verdict {
     display: flex;
@@ -298,14 +298,14 @@
     height: 12px;
     border-radius: 3px;
     flex: 0 0 auto;
-    border: 1px solid rgba(255, 255, 255, 0.15);
+    border: 1px solid var(--swatch-border);
   }
   .legend {
     display: flex;
     flex-direction: column;
     gap: 7px;
-    font-size: 12px;
-    color: var(--text-2);
+    font-size: var(--text-xs);
+    color: var(--fg);
   }
   .legend div {
     display: flex;
@@ -323,25 +323,25 @@
     width: 14px;
     height: 96px;
     border-radius: 3px;
-    background: linear-gradient(to bottom, #9a9a9a, #2a2a2a);
+    background: linear-gradient(to bottom, var(--depth-top), var(--depth-bottom));
   }
   .ticks {
     display: flex;
     flex-direction: column;
     justify-content: space-between;
-    font-size: 11px;
-    font-family: var(--mono);
-    color: var(--text-2);
+    font-size: var(--text-2xs);
+    font-family: var(--font-mono);
+    color: var(--fg);
   }
   details summary {
     cursor: pointer;
   }
   .perf summary {
-    font-size: 11px;
-    color: var(--faint);
+    font-size: var(--text-2xs);
+    color: var(--fg-faint);
     margin-bottom: 6px;
   }
   code {
-    font-family: var(--mono);
+    font-family: var(--font-mono);
   }
 </style>

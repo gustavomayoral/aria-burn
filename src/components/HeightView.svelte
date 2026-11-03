@@ -223,14 +223,14 @@
     transform: translateX(-50%);
     padding: 6px 10px;
     border-radius: 6px;
-    border: 1px solid var(--line-strong);
+    border: 1px solid var(--line);
     background: var(--overlay);
-    font-size: 12px;
+    font-size: var(--text-xs);
     white-space: nowrap;
   }
   .msg.small {
-    font-size: 11px;
-    color: var(--text-2);
+    font-size: var(--text-2xs);
+    color: var(--fg);
   }
   .controls {
     position: absolute;
@@ -240,23 +240,23 @@
     gap: 6px;
     padding: 6px;
     background: var(--overlay);
-    border: 1px solid var(--line-strong);
+    border: 1px solid var(--line);
     border-radius: var(--radius);
   }
   .controls button {
     width: 32px;
     height: 32px;
     border-radius: 6px;
-    border: 1px solid var(--line-strong);
+    border: 1px solid var(--line);
     background: var(--panel);
     display: grid;
     place-items: center;
-    font-size: 16px;
+    font-size: var(--text-lg);
     line-height: 1;
   }
   .controls button.text {
     width: auto;
     padding: 0 10px;
-    font-size: 12px;
+    font-size: var(--text-xs);
   }
 </style>

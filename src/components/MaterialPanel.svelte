@@ -72,7 +72,7 @@
   aside {
     flex: 0 0 272px;
     min-width: 240px;
-    border-right: 1px solid var(--line);
+    border-right: 1px solid var(--line-subtle);
     padding: 18px;
     display: flex;
     flex-direction: column;
@@ -91,18 +91,18 @@
     text-align: left;
     padding: 8px 10px;
     border-radius: var(--radius);
-    border: 1px solid var(--line-strong);
+    border: 1px solid var(--line);
     background: var(--panel);
   }
   .material[aria-pressed='true'] {
     border-color: var(--accent);
-    background: rgba(232, 121, 61, 0.08);
+    background: var(--accent-soft);
   }
   .swatch {
     width: 22px;
     height: 22px;
     border-radius: 5px;
-    border: 1px solid rgba(255, 255, 255, 0.15);
+    border: 1px solid var(--swatch-border);
     flex: 0 0 auto;
   }
   .text {
@@ -113,15 +113,15 @@
     font-weight: 500;
   }
   .kind {
-    font-size: 11px;
-    color: var(--muted);
+    font-size: var(--text-2xs);
+    color: var(--fg-muted);
   }
   .wide {
     width: 100%;
   }
   summary {
     cursor: pointer;
-    color: var(--text-2);
+    color: var(--fg);
     margin-bottom: 10px;
   }
 </style>

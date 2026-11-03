@@ -64,14 +64,14 @@
     align-items: center;
     gap: 16px;
     padding: 8px 20px;
-    border-bottom: 1px solid var(--line);
+    border-bottom: 1px solid var(--line-subtle);
     flex-wrap: wrap;
   }
   .brand {
     display: flex;
     align-items: center;
     gap: 10px;
-    font-size: 15px;
+    font-size: var(--text-md);
     font-weight: 600;
     letter-spacing: 0.2px;
   }
@@ -88,9 +88,9 @@
     justify-content: flex-end;
   }
   .file {
-    font-size: 12px;
-    font-family: var(--mono);
-    color: var(--muted);
+    font-size: var(--text-xs);
+    font-family: var(--font-mono);
+    color: var(--fg-muted);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -100,7 +100,7 @@
     align-items: center;
     gap: 6px;
     max-width: 100%;
-    font-size: 12px;
+    font-size: var(--text-xs);
     border: 1px solid;
     border-radius: 999px;
     padding: 4px 10px;
@@ -116,35 +116,35 @@
     flex: 0 0 auto;
   }
   .pill.green {
-    color: #8fd6ab;
-    background: rgba(76, 175, 125, 0.12);
-    border-color: rgba(76, 175, 125, 0.35);
+    color: var(--ok-text);
+    background: var(--ok-soft);
+    border-color: var(--ok-border);
   }
   .pill.amber {
-    color: #e8c57f;
-    background: rgba(224, 169, 64, 0.1);
-    border-color: rgba(224, 169, 64, 0.35);
+    color: var(--warn-text);
+    background: var(--warn-soft);
+    border-color: var(--warn-border);
   }
   .pill.red {
-    color: var(--danger);
-    background: rgba(229, 72, 77, 0.1);
-    border-color: rgba(229, 72, 77, 0.35);
+    color: var(--danger-text);
+    background: var(--danger-soft);
+    border-color: var(--danger-border);
   }
   .pill.gray {
-    color: var(--muted);
-    border-color: var(--line-strong);
+    color: var(--fg-muted);
+    border-color: var(--line);
   }
   .icon {
     width: 36px;
     height: 36px;
     display: grid;
     place-items: center;
-    border: 1px solid var(--line-strong);
+    border: 1px solid var(--line);
     border-radius: var(--radius);
     background: var(--panel);
-    color: var(--text-2);
+    color: var(--fg);
   }
   .icon:hover {
-    color: var(--text);
+    color: var(--fg-strong);
   }
 </style>

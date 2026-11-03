@@ -69,8 +69,8 @@
   }
   .smoke {
     padding: 6px 20px;
-    background: rgba(77, 145, 214, 0.15);
-    border-bottom: 1px solid var(--line);
-    font-size: 12px;
+    background: var(--info-soft);
+    border-bottom: 1px solid var(--line-subtle);
+    font-size: var(--text-xs);
   }
 </style>
