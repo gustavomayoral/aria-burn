@@ -2,7 +2,8 @@
 <script lang="ts">
   import { app } from '../lib/app.svelte.ts'
   import { describeConnection } from '../lib/emulator.ts'
-  import { machineProblems } from '../lib/settings.ts'
+  import { TILE_MAX_CELLS, gridPitchMm } from 'aria-burn-core/contract'
+  import { applySettingsDump, machineProblems } from '../lib/settings.ts'
 
   const m = $derived(app.settings.machine)
   const net = $derived(app.settings.network)
@@ -15,33 +16,21 @@
 
   const problems = $derived(machineProblems(m))
   const host = $derived(net.bindMode === 'localhost' ? '127.0.0.1' : '<this machine’s LAN IP>')
-  const pitchMm = $derived(Math.min(m.spot.sigmaXMm, m.spot.sigmaYMm) / 3)
+  const pitchMm = $derived(gridPitchMm(m.spot))
+  // One tile covers TILE_MAX_CELLS cells per side at the grid pitch (COD-252).
+  const tileMm = $derived(TILE_MAX_CELLS * pitchMm)
 
   const num = (e: Event & { currentTarget: HTMLInputElement }) => Number(e.currentTarget.value)
+  // Spot size as the 1/e² diameter a datasheet gives; the profile stores σ = d / 4.
+  const diameter = (sigma: number) => +(sigma * 4).toFixed(4)
+  const sigma = (e: Event & { currentTarget: HTMLInputElement }) => num(e) / 4
 
-  // $$ keys the mock maps onto the machine profile.
   function applyDump() {
-    let n = 0
-    for (const line of dump.split(/\r?\n/)) {
-      const match = line.trim().match(/^\$(\d+)\s*=\s*([-\d.]+)/)
-      if (!match) continue
-      const v = Number(match[2])
-      switch (match[1]) {
-        case '11': m.junctionDeviationMm = v; break
-        case '30': m.sMax = v; break
-        case '32': m.laserMode = v === 1; break
-        case '110': m.maxRateMmPerMin.x = v; break
-        case '111': m.maxRateMmPerMin.y = v; break
-        case '120': m.accelMmPerS2.x = v; break
-        case '121': m.accelMmPerS2.y = v; break
-        case '130': m.travelMm.x = v; break
-        case '131': m.travelMm.y = v; break
-        default: continue
-      }
-      n++
-    }
-    dumpResult = n ? `Applied ${n} settings.` : 'No recognized settings found.'
-    showPaste = n === 0
+    const { applied, rejected } = applySettingsDump(m, dump)
+    const parts = [applied.length ? `Applied ${applied.join(', ')}.` : 'No profile settings found.']
+    if (rejected.length) parts.push(`Skipped ${rejected.join('; ')}.`)
+    dumpResult = parts.join(' ')
+    showPaste = applied.length === 0
   }
 
   async function save() {
@@ -123,15 +112,17 @@
           <label>Max S value <code>$30</code>
             <input type="number" min="1" value={m.sMax} onchange={(e) => (m.sMax = num(e))} />
           </label>
-          <label>Spot σ major × minor (mm)
+          <label>Spot width × height (mm)
             <span class="pair">
-              <input type="number" min="0.001" step="0.001" value={m.spot.sigmaXMm} onchange={(e) => (m.spot.sigmaXMm = num(e))} aria-label="Spot sigma, major axis (mm)" />
+              <input type="number" min="0.004" step="0.001" value={diameter(m.spot.sigmaXMm)} onchange={(e) => (m.spot.sigmaXMm = sigma(e))} aria-label="Spot width, long axis, 1/e² diameter (mm)" />
               <span aria-hidden="true">×</span>
-              <input type="number" min="0.001" step="0.001" value={m.spot.sigmaYMm} onchange={(e) => (m.spot.sigmaYMm = num(e))} aria-label="Spot sigma, minor axis (mm)" />
+              <input type="number" min="0.004" step="0.001" value={diameter(m.spot.sigmaYMm)} onchange={(e) => (m.spot.sigmaYMm = sigma(e))} aria-label="Spot height, short axis, 1/e² diameter (mm)" />
             </span>
+            <span class="hint">1/e² diameters; width is the long axis. Gaussian σ {m.spot.sigmaXMm.toFixed(4)} × {m.spot.sigmaYMm.toFixed(4)} mm.</span>
           </label>
-          <label>Major axis angle (°)
-            <input type="number" min="0" max="180" value={m.spot.angleDeg} onchange={(e) => (m.spot.angleDeg = num(e))} />
+          <label>Spot orientation (°)
+            <input type="number" min="-180" max="180" value={m.spot.angleDeg} onchange={(e) => (m.spot.angleDeg = num(e))} />
+            <span class="hint">Angle of the long axis from machine +X, counter-clockwise.</span>
           </label>
         </div>
         <label class="check">
@@ -145,7 +136,7 @@
 
       <section>
         <h2>Motion</h2>
-        <p class="note">Fed to the GRBL planner port (COD-255), so corners, starts and raster-line ends slow down (and scorch) exactly as on the machine.</p>
+        <p class="note">Fed to the emulator's GRBL planner, so corners, starts and raster-line ends slow down (and scorch) exactly as on the machine.</p>
         <div class="grid">
           {#each axes as a (a.key)}
             <div class="field">
@@ -160,12 +151,12 @@
             <input type="number" min="0.001" step="0.001" value={m.junctionDeviationMm} onchange={(e) => (m.junctionDeviationMm = num(e))} />
           </label>
         </div>
-        <p class="note">Grid pitch {pitchMm.toFixed(3)} mm (spot σ ÷ 3); jobs larger than one 9000-cell tile are tiled.</p>
+        <p class="note">Grid pitch {pitchMm.toFixed(4)} mm (spot σ ÷ 3). Tiling follows each job’s burn area, not the bed: up to {TILE_MAX_CELLS} × {TILE_MAX_CELLS} cells (about {tileMm.toFixed(0)} × {tileMm.toFixed(0)} mm at this pitch) renders as one tile; larger jobs are split into tiles.</p>
       </section>
 
       <section>
         <h2>GRBL settings</h2>
-        <p class="note">These values are what LightBurn reads when it sends <code>$$</code>. To match your machine, run <code>$$</code> on it and paste the output here.</p>
+        <p class="note">The profile is the emulated controller’s <code>$11</code>, <code>$30</code>, <code>$32</code> and <code>$110</code>–<code>$131</code>: LightBurn reads them with <code>$$</code>, and writes from its machine settings change them here. To match your machine, run <code>$$</code> on it and paste the output.</p>
         {#if showPaste}
           <label>$$ output
             <textarea rows="6" bind:value={dump} placeholder={'$11=0.010\n$30=1000\n$32=1\n$110=6000\n…'}></textarea>

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// GRBL network emulator (Rust, crate aria-burn-grbl): settings in, three
-// Channels out — contract events, binary sample batches, connection state.
+// GRBL network emulator (Rust, crate aria-burn-grbl): settings in, four
+// Channels out — contract events, binary sample batches, connection state, and
+// the machine profile when a sender's `$x=` write changes it (COD-255).
 // The connection state and the settings shape are app-local until the
 // contract grows them (see COD-265).
 
@@ -28,6 +29,8 @@ export interface EmulatorHandlers {
   event(msg: ChannelEvent): void
   batch(buffer: ArrayBuffer): void
   status(status: ConnectionStatus): void
+  /** A sender wrote profile-backed `$` settings; this is the profile now. */
+  profile(profile: MachineProfile): void
 }
 
 export function emulatorSettings(network: NetworkSettings, profile: MachineProfile): EmulatorSettings {
@@ -49,7 +52,9 @@ export async function subscribeEmulator(h: EmulatorHandlers): Promise<void> {
   batches.onmessage = h.batch
   const status = new Channel<ConnectionStatus>()
   status.onmessage = h.status
-  await invoke('emulator_subscribe', { events, batches, status })
+  const profile = new Channel<MachineProfile>()
+  profile.onmessage = h.profile
+  await invoke('emulator_subscribe', { events, batches, status, profile })
 }
 
 /** Starts, restarts, updates or stops the emulator; resolves to its state. */

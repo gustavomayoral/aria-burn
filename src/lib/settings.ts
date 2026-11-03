@@ -45,6 +45,53 @@ export function defaultSettings(): Settings {
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
 
+/**
+ * GRBL `$` settings the machine profile holds (COD-255): the emulator answers
+ * `$$` with these and a sender's `$x=` writes change them.
+ */
+export const PROFILE_SETTINGS = {
+  11: { label: 'Junction deviation', get: (m: Machine) => m.junctionDeviationMm, set: (m: Machine, v: number) => (m.junctionDeviationMm = v) },
+  30: { label: 'Max S', get: (m: Machine) => m.sMax, set: (m: Machine, v: number) => (m.sMax = v) },
+  32: { label: 'Laser mode', get: (m: Machine) => Number(m.laserMode), set: (m: Machine, v: number) => (m.laserMode = Math.trunc(v) !== 0) },
+  110: { label: 'X max rate', get: (m: Machine) => m.maxRateMmPerMin.x, set: (m: Machine, v: number) => (m.maxRateMmPerMin.x = v) },
+  111: { label: 'Y max rate', get: (m: Machine) => m.maxRateMmPerMin.y, set: (m: Machine, v: number) => (m.maxRateMmPerMin.y = v) },
+  120: { label: 'X acceleration', get: (m: Machine) => m.accelMmPerS2.x, set: (m: Machine, v: number) => (m.accelMmPerS2.x = v) },
+  121: { label: 'Y acceleration', get: (m: Machine) => m.accelMmPerS2.y, set: (m: Machine, v: number) => (m.accelMmPerS2.y = v) },
+  130: { label: 'X max travel', get: (m: Machine) => m.travelMm.x, set: (m: Machine, v: number) => (m.travelMm.x = v) },
+  131: { label: 'Y max travel', get: (m: Machine) => m.travelMm.y, set: (m: Machine, v: number) => (m.travelMm.y = v) },
+} as const
+
+export interface DumpResult {
+  /** Settings applied, as `$n`. */
+  applied: string[]
+  /** Lines that looked like settings but were refused, with why. */
+  rejected: string[]
+}
+
+/**
+ * Applies a pasted `$$` dump from a real machine to the profile, in place.
+ * Lines like `$110=6000.000 (x max rate, mm/min)` are read; settings the
+ * profile doesn't hold ($0, $100…) and anything else are skipped.
+ */
+export function applySettingsDump(machine: Machine, dump: string): DumpResult {
+  const result: DumpResult = { applied: [], rejected: [] }
+  for (const line of dump.split(/\r?\n/)) {
+    const match = line.trim().match(/^\$(\d+)\s*=\s*([-+]?[\d.]+)/)
+    if (!match) continue
+    const n = Number(match[1]) as keyof typeof PROFILE_SETTINGS
+    const setting = PROFILE_SETTINGS[n]
+    if (!setting) continue
+    const v = Number(match[2])
+    if (!Number.isFinite(v) || v < 0 || (n !== 32 && v === 0)) {
+      result.rejected.push(`$${n}=${match[2]}: must be a positive number`)
+      continue
+    }
+    setting.set(machine, v)
+    result.applied.push(`$${n}`)
+  }
+  return result
+}
+
 /** Problems with a machine profile: schema first, then the cross-field rules. */
 export function machineProblems(machine: unknown): string[] {
   const issues = validate(MachineProfile, machine).map((i) => `${i.path}: ${i.message}`)

@@ -2,11 +2,11 @@
 // App-wide state: settings, which screen is showing, the dummy stream run,
 // and live jobs from the GRBL network emulator.
 
-import { SAMPLE_FIELD_INDEX, decodeSampleBatch, type ChannelEvent } from 'aria-burn-core/contract'
+import { SAMPLE_FIELD_INDEX, decodeSampleBatch, type ChannelEvent, type MachineProfile } from 'aria-burn-core/contract'
 import { configureEmulator, emulatorSettings, subscribeEmulator, type ConnectionStatus } from './emulator.ts'
 import { isTauri, runDummyStream, type StreamRequest } from './ipc.ts'
 import { preview } from './preview.svelte.ts'
-import { defaultSettings, loadSettings, saveSettings, type Settings } from './settings.ts'
+import { defaultSettings, loadSettings, machineProblems, saveSettings, type Settings } from './settings.ts'
 
 export type Screen = 'main' | 'settings'
 export type JobSource = 'file' | 'live'
@@ -85,6 +85,7 @@ class AppState {
       event: (msg) => this.onLiveEvent(msg),
       batch: (buf) => this.onLiveBatch(buf),
       status: (status) => (this.connection = status),
+      profile: (profile) => this.onEmulatorProfile(profile),
     })
     await this.applyEmulator()
   }
@@ -97,6 +98,17 @@ class AppState {
     } catch (e) {
       this.connection = { state: 'failed', address: `port ${this.settings.network.port}`, message: String(e) }
     }
+  }
+
+  /** A sender wrote `$` settings the profile holds (`$11`, `$110`…): keep and save them. */
+  private onEmulatorProfile(profile: MachineProfile) {
+    const problems = machineProblems(profile)
+    if (problems.length) {
+      this.warnings = [...this.warnings, `Ignored $ settings from the sender: ${problems[0]}`]
+      return
+    }
+    this.settings.machine = profile
+    void this.savePrefs()
   }
 
   /** A live job's first sample (batch or plan.started, whichever comes first). */
