@@ -4,7 +4,7 @@
 // message per G-code line).
 
 import { Channel, invoke, isTauri } from '@tauri-apps/api/core'
-import type { ChannelEvent, SampleBatchView } from 'aria-burn-core/contract'
+import type { ChannelEvent, MachineProfile, SampleBatchView } from 'aria-burn-core/contract'
 import { StreamReceiver } from './stream-check.ts'
 
 export { isTauri }
@@ -86,3 +86,40 @@ export async function runSmoke(request: StreamRequest): Promise<SmokeReport> {
     return { ok: false, batches: 0, samples: 0, bytes: 0, seconds: 0, mbPerS: 0, batchesPerS: 0, errors: [String(e)], userAgent: navigator.userAgent }
   }
 }
+
+/** Mirrors `JobInput` in src-tauri/src/job.rs: a dropped file's path, or a picked file's text. */
+export type JobInput = { kind: 'path'; path: string } | { kind: 'text'; name: string; text: string }
+
+/** Mirrors `OpenRequest` in src-tauri/src/job.rs. */
+export interface OpenRequest {
+  jobId: number
+  input: JobInput
+  profile: MachineProfile
+  /** Plan even with parse errors (the failing lines are dropped, as GRBL drops them). */
+  planErrors?: boolean
+}
+
+/**
+ * Opens a G-code file job: Rust parses it (aria-burn-gcode), plans it with the
+ * GRBL planner and streams job.loaded → plan.started → batches → plan.done.
+ * Resolves once Rust has queued everything.
+ */
+export async function openJob(
+  request: OpenRequest,
+  onEvent: (msg: ChannelEvent) => void,
+  onBatch: (buffer: ArrayBuffer) => void,
+): Promise<void> {
+  const events = new Channel<ChannelEvent>()
+  events.onmessage = onEvent
+  const batches = new Channel<ArrayBuffer>()
+  batches.onmessage = onBatch
+  // Plain copy: Svelte state proxies don't survive IPC.
+  const plain = JSON.parse(JSON.stringify(request)) as OpenRequest
+  await invoke('job_open', { request: plain, events, batches })
+}
+
+/** Saves an export to the Downloads folder; resolves to the written path. */
+export const saveExport = (name: string, bytes: Uint8Array) => invoke<string>('export_save', bytes, { headers: { 'x-export-name': name } })
+
+/** A file to open at startup (command-line argument or ARIA_BURN_OPEN), or null. */
+export const launchFile = () => (isTauri() ? invoke<string | null>('launch_file') : Promise.resolve(null))

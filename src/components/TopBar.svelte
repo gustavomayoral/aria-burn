@@ -1,22 +1,32 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <script lang="ts">
   import { app } from '../lib/app.svelte.ts'
+  import { burn } from '../lib/burn.svelte.ts'
   import { describeConnection } from '../lib/emulator.ts'
 
-  const status = $derived.by(() => {
-    if (app.source === 'live') {
-      const c = app.connection
-      const m = app.machine
-      const live = app.live
-      if (c.state !== 'connected') return describeConnection(c)
-      const job = live && !live.done ? ` · job ${live.jobId}, ${live.samples.toLocaleString()} samples` : ''
-      const line = m && m.line > 0 ? ` · line ${m.line}` : ''
-      return `${describeConnection(c)} · ${m?.state ?? 'Idle'}${line}${job}`
+  const fileStatus = $derived.by(() => {
+    const job = burn.job
+    if (!job || job.kind !== 'file') return null
+    const b = job.model?.burnBounds
+    const size = b ? ` · ${(b.maxXMm - b.minXMm).toFixed(0)}×${(b.maxYMm - b.minYMm).toFixed(0)}mm` : ''
+    const m4 = job.model?.moves.some((m) => m.laser === 'm4')
+    const mode = job.model ? (m4 ? ' · M4' : ' · M3') : ''
+    const passes = (job.model?.passes.length ?? 0) > 1 ? ` · ${job.model!.passes.length} passes` : ''
+    return `${job.name}${size}${mode}${passes}`
+  })
+
+  // Live pill: green streaming/connected, amber listening, red failed or dropped mid-job.
+  const pill = $derived.by(() => {
+    const c = app.connection
+    const job = burn.job?.kind === 'live' ? burn.job : null
+    if (job?.aborted === 'sender-disconnected' && c.state !== 'connected') return { tone: 'red', label: 'Sender disconnected' }
+    if (c.state === 'connected') {
+      const streaming = job && job.durationS === null ? ` · streaming ${job.name}` : ''
+      return { tone: 'green', label: `${c.address} · ${describeConnection(c).replace('Sender connected from', 'sender')}${streaming}` }
     }
-    const s = app.stream
-    if (s.state === 'running') return `Streaming dummy job… ${s.batches} batches`
-    if (s.state === 'done') return `Dummy job · ${s.samples.toLocaleString()} samples`
-    return 'No job loaded'
+    if (c.state === 'listening') return { tone: 'amber', label: describeConnection(c) }
+    if (c.state === 'failed') return { tone: 'red', label: describeConnection(c) }
+    return { tone: 'gray', label: describeConnection(c) }
   })
 </script>
 
@@ -29,7 +39,13 @@
     <button aria-pressed={app.source === 'file'} onclick={() => (app.source = 'file')}>File</button>
     <button aria-pressed={app.source === 'live'} onclick={() => (app.source = 'live')}>Live (GRBL)</button>
   </div>
-  <div class="status" class:danger={app.source === 'live' && app.connection.state === 'failed'}>{status}</div>
+  <div class="status">
+    {#if app.source === 'live'}
+      <span class="pill {pill.tone}"><span class="dot"></span>{pill.label}</span>
+    {:else if fileStatus}
+      <span class="file">{fileStatus}</span>
+    {/if}
+  </div>
   <button class="icon" aria-label="Connection, laser and machine settings" onclick={() => (app.screen = 'settings')}>
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
       <circle cx="12" cy="12" r="3" />
@@ -67,12 +83,56 @@
   }
   .status {
     flex: 1 1 auto;
-    color: var(--muted);
-    font-size: 12px;
-    text-align: right;
+    min-width: 0;
+    display: flex;
+    justify-content: flex-end;
   }
-  .status.danger {
+  .file {
+    font-size: 12px;
+    font-family: var(--mono);
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+    font-size: 12px;
+    border: 1px solid;
+    border-radius: 999px;
+    padding: 4px 10px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .pill .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    flex: 0 0 auto;
+  }
+  .pill.green {
+    color: #8fd6ab;
+    background: rgba(76, 175, 125, 0.12);
+    border-color: rgba(76, 175, 125, 0.35);
+  }
+  .pill.amber {
+    color: #e8c57f;
+    background: rgba(224, 169, 64, 0.1);
+    border-color: rgba(224, 169, 64, 0.35);
+  }
+  .pill.red {
     color: var(--danger);
+    background: rgba(229, 72, 77, 0.1);
+    border-color: rgba(229, 72, 77, 0.35);
+  }
+  .pill.gray {
+    color: var(--muted);
+    border-color: var(--line-strong);
   }
   .icon {
     width: 36px;

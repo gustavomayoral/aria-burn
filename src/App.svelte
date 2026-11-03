@@ -8,7 +8,8 @@
   import Timeline from './components/Timeline.svelte'
   import TopBar from './components/TopBar.svelte'
   import { app } from './lib/app.svelte.ts'
-  import { runSmoke, smokeConfig, smokeReport } from './lib/ipc.ts'
+  import { burn } from './lib/burn.svelte.ts'
+  import { launchFile, runSmoke, smokeConfig, smokeReport } from './lib/ipc.ts'
 
   let smokeRunning = $state(false)
 
@@ -22,29 +23,34 @@
       return
     }
     await app.startEmulator()
+    const path = await launchFile()
+    if (path) void burn.openFile({ kind: 'path', path })
   })
 </script>
 
 {#if app.screen === 'settings'}
   <SettingsScreen />
-{:else}
-  <div class="shell">
-    <TopBar />
-    {#if smokeRunning}
-      <div class="smoke" role="status">IPC smoke test running…</div>
-    {/if}
-    <div class="body">
-      <MaterialPanel />
-      <main>
-        <CanvasArea />
-        <Timeline />
-      </main>
-      <InfoPanel />
-    </div>
-  </div>
 {/if}
+<!-- Kept mounted behind the settings screen so the burn (and its GPU context) survives. -->
+<div class="shell" hidden={app.screen === 'settings'}>
+  <TopBar />
+  {#if smokeRunning}
+    <div class="smoke" role="status">IPC smoke test running…</div>
+  {/if}
+  <div class="body">
+    <MaterialPanel />
+    <main>
+      <CanvasArea />
+      <Timeline />
+    </main>
+    <InfoPanel />
+  </div>
+</div>
 
 <style>
+  .shell[hidden] {
+    display: none;
+  }
   .shell {
     height: 100%;
     display: flex;

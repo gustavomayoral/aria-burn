@@ -1,69 +1,121 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <script lang="ts">
-  import { DEMO_DURATION_S as TOTAL_S, app } from '../lib/app.svelte.ts'
-  import { isTauri } from '../lib/ipc.ts'
-  import { preview } from '../lib/preview.svelte.ts'
+  import { app } from '../lib/app.svelte.ts'
+  import { burn } from '../lib/burn.svelte.ts'
+  import { fmtDuration } from '../lib/verdicts.ts'
 
-  // Scrub is placeholder until the core's scrub model (COD-264) lands: it shows
-  // stream progress and is not draggable yet.
-  const live = $derived(app.source === 'live')
-  // Live jobs: the length is known once plan.done arrives; until then the bar tracks the job clock.
-  const liveClock = $derived(Math.max(preview.jobTimeS, app.machine?.tS ?? 0, app.live?.progress?.plannedS ?? 0))
-  const total = $derived(live ? (app.live?.done?.durationS ?? liveClock) : TOTAL_S)
-  const elapsed = $derived(live ? (app.live?.done ? total : liveClock) : preview.jobTimeS)
-  const idle = $derived(live ? app.live === null : app.stream.state === 'idle')
-  const progress = $derived(idle || total <= 0 ? 0 : Math.min(100, (elapsed / total) * 100))
-  const running = $derived(app.stream.state === 'running')
+  // The canvas shows only what has burned up to the cutoff: dragging previews
+  // coarse, letting go renders full resolution (core scrub rules, COD-264).
+  const job = $derived(burn.job)
+  const live = $derived(job?.kind === 'live' && app.source === 'live')
+  const streaming = $derived(live && job?.durationS === null)
+  const ready = $derived(burn.status === 'ready' && burn.grid !== null && (app.source === 'live' ? job?.kind === 'live' : job?.kind === 'file'))
+  const total = $derived(burn.totalS)
+  const elapsed = $derived(Math.min(1, burn.progress) * total)
 
-  const fmt = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, '0')}`
+  const label = $derived.by(() => {
+    if (!ready || !job) return app.source === 'live' ? 'No job yet' : '—'
+    const pct = `${Math.round(burn.progress * 100)}%`
+    if (streaming) {
+      const line = app.machine && app.machine.line > 0 ? ` · line ${app.machine.line.toLocaleString('en-US')}` : ''
+      return burn.follow ? `Live · ${fmtDuration(total)} streamed${line}` : `${pct} · ${fmtDuration(elapsed)} / ${fmtDuration(total)} streamed`
+    }
+    return `${pct} · ${fmtDuration(elapsed)} / ${fmtDuration(total)}`
+  })
 </script>
 
 <div class="timeline">
-  <button
-    class="play"
-    aria-label={running ? 'Streaming' : 'Stream dummy job'}
-    disabled={running || live || !isTauri()}
-    onclick={() => app.runDemoStream()}
-  >
-    <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
-      {#if running}
-        <rect x="2" y="2" width="3.5" height="10" fill="currentColor" /><rect x="8.5" y="2" width="3.5" height="10" fill="currentColor" />
+  <button class="play" aria-label={burn.playing ? 'Pause' : 'Play'} disabled={!ready || live} onclick={() => burn.togglePlay()}>
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      {#if burn.playing}
+        <rect x="5" y="4" width="4" height="16" /><rect x="15" y="4" width="4" height="16" />
       {:else}
-        <path d="M3 1.5v11l9-5.5z" fill="currentColor" />
+        <polygon points="6 4 20 12 6 20" />
       {/if}
     </svg>
   </button>
-  <input type="range" min="0" max="100" step="0.5" value={progress} disabled aria-label="Job progress" />
-  <span class="label">{fmt(elapsed)} / {live && !app.live?.done ? '…' : fmt(total)}</span>
+  <div class="track">
+    {#if streaming}
+      <!-- The whole track is what has streamed so far; scrubbing can't pass the head. -->
+      <div class="streamed" aria-hidden="true"></div>
+    {/if}
+    <input
+      type="range"
+      min="0"
+      max="1000"
+      step="1"
+      value={Math.round(burn.progress * 1000)}
+      disabled={!ready}
+      oninput={(e) => burn.scrub(Number(e.currentTarget.value) / 1000)}
+      aria-label="Job progress"
+      aria-valuetext={label}
+    />
+  </div>
+  <span class="label">{label}</span>
+  {#if live}
+    <label class="follow">
+      <input type="checkbox" checked={burn.follow} disabled={!streaming} onchange={(e) => burn.setFollow(e.currentTarget.checked)} />
+      Follow live
+    </label>
+  {/if}
 </div>
 
 <style>
   .timeline {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 10px 16px;
+    gap: 14px;
+    padding: 12px 20px;
     border-top: 1px solid var(--line);
+    flex-wrap: wrap;
   }
   .play {
     width: 36px;
     height: 36px;
     border-radius: 50%;
-    border: 0;
-    background: var(--accent);
-    color: #1b1a18;
+    border: 1px solid var(--line-strong);
+    background: var(--panel);
     display: grid;
     place-items: center;
+    flex: 0 0 auto;
+  }
+  .track {
+    flex: 1 1 200px;
+    min-width: 200px;
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+  .streamed {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 4px;
+    transform: translateY(-50%);
+    border-radius: 2px;
+    background: rgba(232, 121, 61, 0.35);
+    pointer-events: none;
   }
   input[type='range'] {
-    flex: 1 1 auto;
+    position: relative;
+    width: 100%;
     accent-color: var(--accent);
   }
   .label {
     font-family: var(--mono);
     font-size: 12px;
-    color: var(--text-2);
-    min-width: 110px;
+    color: var(--muted);
+    min-width: 150px;
     text-align: right;
+    white-space: nowrap;
+  }
+  .follow {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-2);
+    min-height: 32px;
   }
 </style>

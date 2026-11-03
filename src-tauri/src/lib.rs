@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Laser Sim desktop shell. Owns the machine side (GRBL emulator, planner)
-//! and streams to the webview over Tauri Channels.
+//! Laser Sim desktop shell. Owns the machine side (G-code parser, GRBL
+//! emulator and planner) and streams to the webview over Tauri Channels.
 
 mod emulator;
+mod job;
 mod smoke;
 mod stream;
 
@@ -36,12 +37,16 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .manage(smoke)
         .manage(Arc::new(emulator::EmulatorState::default()))
+        .manage(Arc::new(job::JobState::default()))
         .invoke_handler(tauri::generate_handler![
             start_dummy_stream,
             smoke::smoke_config,
             smoke::smoke_report,
             emulator::emulator_subscribe,
-            emulator::emulator_configure
+            emulator::emulator_configure,
+            job::job_open,
+            job::launch_file,
+            job::export_save
         ])
         .run(tauri::generate_context!())
         .expect("error while running Laser Sim");

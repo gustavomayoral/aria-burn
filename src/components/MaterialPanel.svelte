@@ -11,6 +11,9 @@
     void app.savePrefs()
   }
 
+  /** Honesty tag from the profile's metadata (COD-266 → COD-254 → COD-257), not from code. */
+  const tag = (m: MaterialProfile) => m.provenance.label ?? (m.provenance.source === 'calibrated' ? 'calibrated' : m.provenance.source === 'user' ? 'your profile' : 'provisional')
+
   const fmt = (v: number) => (v >= 100 ? v.toFixed(0) : v >= 1 ? v.toFixed(2) : v.toPrecision(2))
 
   /** Read-only threshold rows, per response kind. */
@@ -27,6 +30,10 @@
       rows.push(['Mark start', `${fmt(r.markStartJPerMm2)} J/mm²`], ['Mark full', `${fmt(r.markFullJPerMm2)} J/mm²`])
       rows.push(['Damage', `${fmt(r.damageThresholdJPerMm2)} J/mm²`])
     }
+    const fire = selected.fireRisk
+    if (fire.kind === 'temperature') rows.push(['Fire risk', `${Math.round(fire.thresholdK - 273.15)} °C built-up heat`])
+    else if (fire.kind === 'fluence') rows.push(['Fire risk', `${fmt(fire.thresholdJPerMm2)} J/mm²`])
+    rows.push(['Speed / dwell', selected.thermal.kind === 'peakTemperature' ? 'thermal dose (COD-258)' : 'fluence only'])
     return rows
   })
 </script>
@@ -40,12 +47,14 @@
           <span class="swatch" style:background={labToCss(m.response.baseColor)} aria-hidden="true"></span>
           <span class="text">
             <span class="name">{m.name.replace(' (provisional)', '')}</span>
-            <span class="kind">{KIND_LABEL[m.response.kind]} · provisional profile</span>
+            <span class="kind">{KIND_LABEL[m.response.kind]} · {tag(m)}</span>
           </span>
         </button>
       {/each}
     </div>
-    <p class="note">Provisional profiles from published data, not yet validated against real burns. Treat predictions as approximate.</p>
+    {#if selected.provenance.source === 'provisional'}
+      <p class="note">Provisional profiles from published data, not yet validated against real burns. Treat predictions as approximate.</p>
+    {/if}
     <button class="btn wide" disabled>Calibrate from test grid… (coming later)</button>
   </div>
   <details>
