@@ -12,11 +12,11 @@ The simulation core lives in the sibling repo [aria-burn-core](../aria-burn-core
   - `lib/settings.ts` — persisted machine profile and UI preferences (`tauri-plugin-store`)
 - `src-tauri/` — the Rust shell
   - `emulator.rs` — starts/stops the GRBL emulator from the network settings and forwards its traffic to the webview Channels
-  - `stream.rs` — dummy sample stream (stands in for the planner until COD-255)
+  - `stream.rs` — dummy sample stream for the IPC smoke test
   - `smoke.rs` — in-app IPC throughput smoke test
 - `crates/aria-burn-contract/` — Rust contract types, **generated** at build time from the core's `contract.schema.json` (typify) and `sample-batch-layout.json` (binary codec). Never write these by hand. `tests/fixtures.rs` round-trips every fixture in the core's `src/contract/fixtures/`.
 - `crates/aria-burn-gcode/` — GRBL laser G-code parser (COD-263): file bytes or a live byte stream → the contract's `JobModel`, with per-line GRBL `error:N` codes for the emulator. `tests/corpus/` holds the parser corpus.
-- `crates/aria-burn-grbl/` — GRBL 1.1 network emulator (COD-265): TCP server for LightBurn / LaserGRBL, line protocol with GRBL-sized RX and planner buffers, real-time commands, placeholder `$` settings, and an interim trapezoid sampler behind a `Planner` trait that the planner port (COD-255) replaces. `tests/tcp.rs` drives it with scripted TCP senders.
+- `crates/aria-burn-grbl/` — GRBL 1.1 network emulator (COD-265): TCP server for LightBurn / LaserGRBL, line protocol with GRBL-sized RX and planner buffers, real-time commands, and `$` settings backed by the machine profile (COD-255). `planner.rs` is a port of GRBL 1.1h's planner and stepper velocity profiles (COD-255; GPL, per COD-261), which also samples the motion for the sim; `plan_job` plans a whole parsed job. `tests/tcp.rs` drives it with scripted TCP senders.
 - `docs/design/` — design documents (COD-250)
 - `docs/testing/` — manual test procedures (`grbl-emulator-manual.md`: LightBurn / LaserGRBL on macOS and Windows)
 - `aria-burn.code-workspace` — opens this repo and `../aria-burn-core` in one editor window

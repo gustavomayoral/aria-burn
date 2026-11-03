@@ -60,6 +60,8 @@ pub enum UiMessage {
     Event(Box<Event>),
     Batch(Vec<u8>),
     Connection(ConnectionStatus),
+    /// A sender's `$x=` write changed the machine profile; the settings follow it.
+    Profile(Box<MachineProfile>),
 }
 
 /// Receives the emulator's UI traffic, on the forwarder thread.
@@ -324,6 +326,7 @@ impl ProtocolLoop {
             let _ = self.ui.send(match o {
                 Output::Event(e) => UiMessage::Event(e),
                 Output::Batch(b) => UiMessage::Batch(b),
+                Output::Profile(p) => UiMessage::Profile(p),
             });
         }
     }

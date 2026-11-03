@@ -12,6 +12,12 @@
 //!   (15 blocks) holds back `ok`s, which is what paces both character-counting
 //!   and send-response senders. Instant pacing never fills the planner.
 //! - A rejected line gets `error:N` with the parser's GRBL code and changes nothing.
+//! - Spindle syncs as in GRBL's `gc_execute_line`: any M3/M4/M5 change, and an
+//!   S change while the laser is on unless the line moves in laser mode, stop
+//!   motion before the line runs; so does G4, which then dwells.
+//! - `!` and jog cancel decelerate along the path (the planner's feed hold).
+//! - `$$` reads the emulated settings and `$x=` writes them; writes to profile
+//!   settings change the machine profile, which goes to the webview to save.
 //!
 //! Network jobs: a job opens with the first G-code line after the last job
 //! closed, and closes on M2/M30 once motion ends, on Ctrl-X, on disconnect, or
@@ -22,7 +28,7 @@
 //! counts) → [error, if cut short by Ctrl-X or a disconnect] → job.loaded →
 //! plan.done.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::VecDeque;
 
 use aria_burn_contract::{
     ErrorEvent, ErrorEventCode, ErrorEventType, Event, JobLoadedEvent, JobLoadedEventType, JobModel, JobProgressEvent,
@@ -33,8 +39,9 @@ use aria_burn_contract::{
 };
 use aria_burn_gcode::{ParseOptions, Parser};
 
-use crate::planner::{Block, InterimPlanner, Overrides, Planner, SAMPLE_DT_MAX_S, grid_pitch_mm};
+use crate::planner::{Block, GrblPlanner, Item, Overrides, Planner, SAMPLE_DT_MAX_S, grid_pitch_mm};
 use crate::protocol::{self, error, rt};
+use crate::settings::{GrblSettings, Written, parse_write};
 
 /// When `ok`s go out.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
@@ -43,7 +50,9 @@ pub enum Pacing {
     /// Motion runs on the wall clock and a full planner holds back `ok`s, as on the machine.
     #[default]
     Realtime,
-    /// Every line is answered as soon as it is parsed and motion completes at once.
+    /// Every line is answered as soon as it is parsed and motion runs ahead
+    /// without waiting for the wall clock, as if the sender kept GRBL's buffers
+    /// full. The planner drains when the job ends or the sender goes quiet.
     Instant,
 }
 
@@ -67,6 +76,8 @@ pub enum Output {
     Event(Box<Event>),
     /// One encoded sample batch (contract sample-batch layout).
     Batch(Vec<u8>),
+    /// A `$x=` write changed the machine profile.
+    Profile(Box<MachineProfile>),
 }
 
 /// Longest wall-clock step real-time motion takes at once, so a stalled thread
@@ -74,6 +85,8 @@ pub enum Output {
 const MAX_STEP_S: f64 = 0.25;
 /// Partial batches go out at least this often (s), so the preview builds live.
 const BATCH_FLUSH_S: f64 = 0.05;
+/// Instant pacing: wall time without input after which queued motion runs out (s).
+const INSTANT_QUIET_S: f64 = 0.2;
 /// job.progress interval (s): contract JOB_PROGRESS_HZ = 10.
 const PROGRESS_S: f64 = 0.1;
 /// Status reports between WCO / Ov fields, as GRBL's refresh counters.
@@ -242,12 +255,14 @@ fn event(e: Event) -> Output {
 
 pub struct Machine {
     config: MachineConfig,
+    /// The emulated `$` settings; they hold the machine profile.
+    settings: GrblSettings,
     planner: Box<dyn Planner>,
     parser: Parser,
     /// Received line bytes not yet run (real-time bytes never land here).
     rx: Vec<u8>,
-    /// Moves of the line being run that didn't fit in the planner yet.
-    pending: VecDeque<Block>,
+    /// Moves (and syncs) of the line being run that the planner can't take yet.
+    pending: VecDeque<Item>,
     /// The line being run is waiting for `pending` to drain before its `ok`.
     pending_ok: bool,
     /// Where the last queued move ends: the base for jogs.
@@ -255,18 +270,20 @@ pub struct Machine {
     /// The planner holds a jog (jogs and G-code lines never share it).
     jogging: bool,
     hold: bool,
+    /// Jog cancel: decelerating, then the jog is dropped.
+    jog_cancel: bool,
     alarm: bool,
     overrides: Overrides,
     overrides_reported: bool,
     reports: u32,
-    /// `$x=` writes, over the defaults.
-    settings: BTreeMap<u16, f64>,
     /// Last move queued, for `$G`.
     last_move: Option<Block>,
     job: Option<LiveJob>,
     next_job_id: u32,
     end_job_when_idle: bool,
     idle_s: f64,
+    /// Wall time since the sender last sent anything.
+    quiet_s: f64,
     rx_overflowed: bool,
     /// Bytes for the sender.
     out: Vec<u8>,
@@ -276,32 +293,37 @@ pub struct Machine {
 
 impl Machine {
     pub fn new(config: MachineConfig) -> Self {
-        let planner = Box::new(InterimPlanner::new(&config.profile));
+        let settings = GrblSettings::new(config.profile.clone());
+        let planner = Box::new(GrblPlanner::new(&settings));
         Self::with_planner(config, planner)
     }
 
-    /// With another planner behind the [`Planner`] interface (COD-255).
-    pub fn with_planner(config: MachineConfig, planner: Box<dyn Planner>) -> Self {
+    /// With another planner behind the [`Planner`] interface.
+    pub fn with_planner(config: MachineConfig, mut planner: Box<dyn Planner>) -> Self {
+        let settings = GrblSettings::new(config.profile.clone());
+        planner.configure(&settings);
         Self {
             config,
+            parser: new_parser((0.0, 0.0), &settings),
+            settings,
             planner,
-            parser: new_parser((0.0, 0.0)),
             rx: Vec::new(),
             pending: VecDeque::new(),
             pending_ok: false,
             target: (0.0, 0.0),
             jogging: false,
             hold: false,
+            jog_cancel: false,
             alarm: false,
             overrides: Overrides::default(),
             overrides_reported: false,
             reports: 0,
-            settings: BTreeMap::new(),
             last_move: None,
             job: None,
             next_job_id: 1,
             end_job_when_idle: false,
             idle_s: 0.0,
+            quiet_s: 0.0,
             rx_overflowed: false,
             out: Vec::new(),
             outputs: Vec::new(),
@@ -312,9 +334,15 @@ impl Machine {
         self.config.pacing = pacing;
     }
 
+    /// The settings screen saved a profile. `$` writes to other settings stay.
     pub fn set_profile(&mut self, profile: MachineProfile) {
-        self.planner.set_profile(&profile);
+        self.settings.set_profile(profile.clone());
+        self.planner.configure(&self.settings);
         self.config.profile = profile;
+    }
+
+    pub fn settings(&self) -> &GrblSettings {
+        &self.settings
     }
 
     /// Replies for the sender since the last call.
@@ -335,7 +363,7 @@ impl Machine {
         self.overrides = Overrides::default();
         self.rx_overflowed = false;
         self.reports = 0;
-        self.parser = new_parser(self.target);
+        self.parser = new_parser(self.target, &self.settings);
         self.out.extend_from_slice(protocol::BANNER.as_bytes());
     }
 
@@ -361,11 +389,14 @@ impl Machine {
 
     /// Bytes from the sender.
     pub fn receive(&mut self, bytes: &[u8]) {
+        if !bytes.is_empty() {
+            self.quiet_s = 0.0;
+        }
         for &b in bytes {
             match b {
                 rt::STATUS => self.status_report(),
                 rt::HOLD => self.feed_hold(),
-                rt::RESUME => self.hold = false,
+                rt::RESUME => self.resume(),
                 rt::RESET => self.reset(),
                 rt::JOG_CANCEL => self.jog_cancel(),
                 rt::FEED_100..=rt::SPINDLE_MINUS_1 => self.override_command(b),
@@ -395,11 +426,18 @@ impl Machine {
 
     /// Advances by `wall_dt_s` of wall time: motion, `ok`s it unblocks, job close.
     pub fn step(&mut self, wall_dt_s: f64) {
-        let dt = match self.config.pacing {
-            Pacing::Realtime => wall_dt_s.min(MAX_STEP_S),
-            Pacing::Instant => f64::INFINITY,
-        };
-        self.run_motion(dt);
+        self.quiet_s += wall_dt_s;
+        match self.config.pacing {
+            Pacing::Realtime => self.run_motion(wall_dt_s.min(MAX_STEP_S)),
+            Pacing::Instant if self.end_job_when_idle || self.quiet_s >= INSTANT_QUIET_S => {
+                self.run_motion(f64::INFINITY)
+            }
+            Pacing::Instant => self.run_motion_fed(),
+        }
+        if self.jog_cancel && self.planner.hold_complete() {
+            self.jog_cancel = false;
+            self.clear_motion();
+        }
         self.process_lines();
         if let Some(job) = &mut self.job {
             job.batch_age_s += wall_dt_s;
@@ -454,29 +492,10 @@ impl Machine {
             GrblState::Alarm
         } else if self.hold {
             GrblState::Hold
-        } else if self.planner.queued() > 0 || !self.pending.is_empty() {
+        } else if self.planner.queued() > 0 || !self.pending.is_empty() || self.jog_cancel {
             if self.jogging { GrblState::Jog } else { GrblState::Run }
         } else {
             GrblState::Idle
-        }
-    }
-
-    fn setting(&self, n: u16) -> f64 {
-        if let Some(v) = self.settings.get(&n) {
-            return *v;
-        }
-        let p = &self.config.profile;
-        match n {
-            11 => p.junction_deviation_mm,
-            30 => p.s_max,
-            32 => f64::from(u8::from(p.laser_mode)),
-            110 => p.max_rate_mm_per_min.x,
-            111 => p.max_rate_mm_per_min.y,
-            120 => p.accel_mm_per_s2.x,
-            121 => p.accel_mm_per_s2.y,
-            130 => p.travel_mm.x,
-            131 => p.travel_mm.y,
-            _ => protocol::DEFAULT_SETTINGS.iter().find(|(k, _)| *k == n).map_or(0.0, |(_, v)| *v),
         }
     }
 
@@ -498,12 +517,12 @@ impl Machine {
         let state = match self.state() {
             GrblState::Idle => "Idle",
             GrblState::Run => "Run",
-            // Holds stop at once (no deceleration), so always complete.
-            GrblState::Hold => "Hold:0",
+            GrblState::Hold if self.planner.hold_complete() => "Hold:0",
+            GrblState::Hold => "Hold:1",
             GrblState::Jog => "Jog",
             GrblState::Alarm => "Alarm",
         };
-        let mask = self.setting(10) as u32;
+        let mask = self.settings.status_mask();
         let (x, y) = snap.position_mm;
         let pos = if mask & 1 != 0 { "MPos" } else { "WPos" };
         let mut s = format!("<{state}|{pos}:{x:.3},{y:.3},0.000");
@@ -529,13 +548,27 @@ impl Machine {
         match self.state() {
             GrblState::Jog => self.jog_cancel(),
             GrblState::Alarm => {}
-            _ => self.hold = true,
+            _ => {
+                self.hold = true;
+                self.planner.set_hold(true);
+            }
         }
     }
 
+    fn resume(&mut self) {
+        if self.hold {
+            self.hold = false;
+            self.planner.set_hold(false);
+        }
+    }
+
+    /// Jog cancel: decelerate to a stop, then drop the rest of the jog.
     fn jog_cancel(&mut self) {
         if self.state() == GrblState::Jog {
-            self.clear_motion();
+            self.pending.clear();
+            self.pending_ok = false;
+            self.jog_cancel = true;
+            self.planner.set_hold(true);
         }
     }
 
@@ -564,7 +597,11 @@ impl Machine {
     /// Ctrl-X: stop now, drop every buffer, keep the head where it is. A reset
     /// while moving loses position on a real machine, so it raises ALARM:3.
     fn reset(&mut self) {
-        let moving = !self.hold && matches!(self.state(), GrblState::Run | GrblState::Jog);
+        let moving = match self.state() {
+            GrblState::Run | GrblState::Jog => true,
+            GrblState::Hold => !self.planner.hold_complete(),
+            _ => false,
+        };
         let abort = self.has_work().then_some(Abort::Reset);
         if moving {
             self.alarm = true;
@@ -578,7 +615,7 @@ impl Machine {
         self.overrides_reported = false;
         self.reports = 0;
         // gc_init: modal state back to power-up defaults.
-        self.parser = new_parser(self.target);
+        self.parser = new_parser(self.target, &self.settings);
         self.out.extend_from_slice(protocol::BANNER.as_bytes());
         if self.alarm {
             self.out.extend_from_slice(protocol::UNLOCK_HINT.as_bytes());
@@ -590,17 +627,31 @@ impl Machine {
         self.planner.stop();
         self.pending.clear();
         self.pending_ok = false;
+        self.jog_cancel = false;
         self.end_job_when_idle = false;
         self.target = self.planner.snapshot().position_mm;
         self.parser.set_position(self.target);
     }
 
     fn run_motion(&mut self, dt: f64) {
-        if self.hold || self.alarm {
+        if self.alarm {
             return;
         }
-        let (job, outputs, profile) = (&mut self.job, &mut self.outputs, &self.config.profile);
+        let (job, outputs, profile) = (&mut self.job, &mut self.outputs, self.settings.profile());
         self.planner.advance(dt, self.overrides, &mut |t, s| {
+            if let Some(job) = job.as_mut() {
+                job.push(t, s, profile, outputs);
+            }
+        });
+    }
+
+    /// Instant pacing: motion up to the point the planner holds everything received.
+    fn run_motion_fed(&mut self) {
+        if self.alarm {
+            return;
+        }
+        let (job, outputs, profile) = (&mut self.job, &mut self.outputs, self.settings.profile());
+        self.planner.advance_fed(self.overrides, &mut |t, s| {
             if let Some(job) = job.as_mut() {
                 job.push(t, s, profile, outputs);
             }
@@ -626,12 +677,22 @@ impl Machine {
 
     fn queue_pending(&mut self) {
         while self.planner_has_room() {
-            let Some(block) = self.pending.pop_front() else { break };
-            self.planner.push(block);
-            self.target = (block.x_mm, block.y_mm);
-            self.jogging = block.jog;
-            if !block.jog {
-                self.last_move = Some(block);
+            let Some(&item) = self.pending.front() else { break };
+            // A sync holds the line (and its `ok`) until motion has stopped, as
+            // GRBL's protocol_buffer_synchronize does. Instant pacing lets the
+            // planner do the waiting.
+            if matches!(item, Item::Sync { .. }) && self.config.pacing == Pacing::Realtime && self.planner.queued() > 0
+            {
+                break;
+            }
+            self.pending.pop_front();
+            self.planner.push(item);
+            if let Item::Block(block) = item {
+                self.target = (block.x_mm, block.y_mm);
+                self.jogging = block.jog;
+                if !block.jog {
+                    self.last_move = Some(block);
+                }
             }
         }
         if self.pending.is_empty() && self.pending_ok {
@@ -664,11 +725,24 @@ impl Machine {
         }
         let mut bytes = line.to_vec();
         bytes.push(b'\n');
+        let (laser0, s0) = self.parser.laser_state();
         let result = self.parser.feed_bytes(&bytes).pop().expect("one complete line in, one outcome out");
         match result {
             Ok(range) => {
+                let (laser1, s1) = self.parser.laser_state();
+                let moves_on_line = !range.is_empty();
+                // gc_execute_line: spindle changes are synced, except an S change
+                // that rides on a motion line in laser mode.
+                let laser_mode = self.settings.profile().laser_mode;
+                let spindle_sync =
+                    laser1 != laser0 || (s1 != s0 && laser0 != LaserMode::Off && !(laser_mode && moves_on_line));
+                if let Some(dwell_s) = protocol::dwell_s(line) {
+                    self.pending.push_back(Item::Sync { dwell_s });
+                } else if spindle_sync {
+                    self.pending.push_back(Item::Sync { dwell_s: 0.0 });
+                }
                 let moves = &self.parser.moves()[range];
-                self.pending.extend(moves.iter().map(Block::from_move));
+                self.pending.extend(moves.iter().map(|m| Item::Block(Block::from_move(m))));
                 if protocol::is_program_end(line) {
                     self.end_job_when_idle = true;
                 }
@@ -689,7 +763,7 @@ impl Machine {
             return match self.parse_jog(jog) {
                 Ok(block) => {
                     self.close_job();
-                    self.pending.push_back(block);
+                    self.pending.push_back(Item::Block(block));
                     self.pending_ok = true;
                     self.queue_pending();
                     self.parser.set_position((block.x_mm, block.y_mm));
@@ -706,10 +780,7 @@ impl Machine {
                 if matches!(state, GrblState::Run | GrblState::Hold) {
                     return self.error(error::IDLE_ERROR);
                 }
-                for &(n, _) in protocol::DEFAULT_SETTINGS {
-                    let v = self.setting(n);
-                    let line =
-                        if protocol::is_integer_setting(n) { format!("${n}={v:.0}") } else { format!("${n}={v:.3}") };
+                for line in self.settings.report_lines() {
                     self.reply(&line);
                 }
                 self.ok()
@@ -750,21 +821,19 @@ impl Machine {
             }
             // Homing isn't emulated: the same answer as GRBL with $22=0.
             "H" => self.error(error::SETTING_DISABLED),
-            _ => match self.parse_setting(&upper) {
-                Some((n, v)) => {
-                    self.settings.insert(n, v);
+            _ => match parse_write(&upper).map(|(n, v)| self.settings.set(n, v)) {
+                Some(Ok(written)) => {
+                    self.planner.configure(&self.settings);
+                    if written == Written::Profile {
+                        self.config.profile = self.settings.profile().clone();
+                        self.outputs.push(Output::Profile(Box::new(self.config.profile.clone())));
+                    }
                     self.ok()
                 }
+                Some(Err(code)) => self.error(code),
                 None => self.error(error::INVALID_STATEMENT),
             },
         }
-    }
-
-    fn parse_setting(&self, cmd: &str) -> Option<(u16, f64)> {
-        let (n, v) = cmd.split_once('=')?;
-        let n: u16 = n.trim().parse().ok()?;
-        let v: f64 = v.trim().parse().ok()?;
-        protocol::DEFAULT_SETTINGS.iter().any(|(k, _)| *k == n).then_some((n, v))
     }
 
     /// `$J=` words: G20/G21, G90/G91, G53, X, Y, Z (ignored), F (required).
@@ -829,8 +898,9 @@ impl Machine {
     }
 }
 
-fn new_parser(start: (f64, f64)) -> Parser {
-    let mut p = Parser::new(JobSourceKind::Network, "Network job", ParseOptions::default());
+fn new_parser(start: (f64, f64), settings: &GrblSettings) -> Parser {
+    let opts = ParseOptions { arc_tolerance_mm: settings.arc_tolerance_mm(), ..ParseOptions::default() };
+    let mut p = Parser::new(JobSourceKind::Network, "Network job", opts);
     p.set_position(start);
     p
 }

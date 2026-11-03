@@ -1,7 +1,7 @@
 [package]
 name = "aria-burn-grbl"
 version = "0.1.0"
-description = "GRBL 1.1 network emulator: TCP server, line protocol, real-time commands, interim motion sampler"
+description = "GRBL 1.1 network emulator: TCP server, line protocol, real-time commands, $ settings, GRBL planner port"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true

@@ -16,7 +16,9 @@ use aria_burn_contract::{
     Event, JobModel, JobProgressEvent, MachineProfile, PlanDoneEvent,
     sample_batch::{MotionSample, SampleBatchHeader, decode_sample_batch},
 };
-use aria_burn_grbl::{ConnectionStatus, MachineConfig, Pacing, Server, ServerConfig, Sink, UiMessage};
+use aria_burn_grbl::{
+    ConnectionStatus, GrblSettings, MachineConfig, Pacing, Server, ServerConfig, Sink, UiMessage, planner::plan_job,
+};
 
 const TIMEOUT: Duration = Duration::from_secs(20);
 
@@ -39,6 +41,11 @@ impl Collect {
     fn events(&self) -> Vec<Event> {
         let all = self.0.lock().unwrap();
         all.iter().filter_map(|m| if let UiMessage::Event(e) = m { Some((**e).clone()) } else { None }).collect()
+    }
+
+    fn profiles(&self) -> Vec<MachineProfile> {
+        let all = self.0.lock().unwrap();
+        all.iter().filter_map(|m| if let UiMessage::Profile(p) = m { Some((**p).clone()) } else { None }).collect()
     }
 
     fn connections(&self) -> Vec<ConnectionStatus> {
@@ -110,7 +117,7 @@ impl Collect {
                     continue;
                 }
                 UiMessage::Event(e) => e,
-                UiMessage::Connection(_) => continue,
+                UiMessage::Connection(_) | UiMessage::Profile(_) => continue,
             };
             kinds.push(match &**e {
                 Event::JobStreamingEvent(j) if j.job_id == job_id => 's',
@@ -336,7 +343,7 @@ fn raster(rows: usize, cols: usize, feed: u32) -> Vec<String> {
 }
 
 #[test]
-fn handshake_and_placeholder_settings() {
+fn handshake_and_settings() {
     let (server, sink) = start(Pacing::Realtime);
     let mut c = Client::connect(server.address());
     assert_eq!(c.command("$I"), ["[VER:1.1h.20190825:Laser Sim]", "[OPT:V,15,128]", "ok"]);
@@ -435,6 +442,11 @@ fn instant_pacing_answers_at_once_and_keeps_job_time() {
     assert!(started.elapsed() < Duration::from_secs(10), "{:?}", started.elapsed());
     let (done, samples) = sink.verified_job(1);
     assert!(done.duration_s > 55.0, "{}", done.duration_s);
+    // However the stream was chunked, motion is GRBL's with full buffers: the
+    // same as planning the whole job in one go.
+    let model = sink.job_loaded(1);
+    let planned = plan_job(&model, &GrblSettings::new(profile()), &mut |_, _| {});
+    assert!((done.duration_s - planned).abs() < 1e-6, "{} vs {planned}", done.duration_s);
     assert!(samples.len() > 100_000, "{}", samples.len());
     assert!(done.batch_count > 1, "a long job is split into full batches");
 
@@ -609,4 +621,111 @@ fn bind_failure_is_reported() {
     let err = Server::start(ServerConfig { bind: server.address(), machine }, sink.clone()).err().unwrap();
     assert_eq!(err.kind(), ErrorKind::AddrInUse);
     assert!(matches!(&sink.connections()[..], [ConnectionStatus::Failed { .. }]));
+}
+
+#[test]
+fn dollar_settings_are_the_machine_profile() {
+    let (server, sink) = start(Pacing::Instant);
+    let mut c = Client::connect(server.address());
+    assert!(c.command("$$").contains(&"$11=0.010".to_owned()));
+    // Writes to profile settings change the profile and reach the webview.
+    assert_eq!(c.command("$11=0.2"), ["ok"]);
+    assert_eq!(c.command("$120=2000"), ["ok"]);
+    assert_eq!(c.command("$32=0"), ["ok"]);
+    let settings = c.command("$$");
+    for expected in ["$11=0.200", "$120=2000.000", "$32=0"] {
+        assert!(settings.contains(&expected.to_owned()), "{expected} in {settings:?}");
+    }
+    let p = sink.wait_for("profile", |c| c.profiles().last().cloned().filter(|p| !p.laser_mode));
+    assert_eq!((p.junction_deviation_mm, p.accel_mm_per_s2.x), (0.2, 2000.0));
+    // Other settings are kept but aren't part of the profile.
+    let before = sink.profiles().len();
+    assert_eq!(c.command("$100=100"), ["ok"]);
+    assert_eq!(sink.profiles().len(), before);
+    // GRBL's write errors.
+    assert_eq!(c.command("$110=-5"), ["error:4"]);
+    assert_eq!(c.command("$99=1"), ["error:3"]);
+    assert_eq!(c.command("$0=1"), ["error:6"]);
+    assert_eq!(c.command("$30=0"), ["error:3"]);
+    // Saving the settings screen replaces the profile, not the other writes.
+    server.set_profile(profile());
+    let settings = c.command("$$");
+    assert!(settings.contains(&"$11=0.010".to_owned()) && settings.contains(&"$100=100.000".to_owned()));
+    // Not while moving.
+    assert_eq!(c.command("$J=G91 X50 F600"), ["ok"]);
+    assert_eq!(c.command("$11=0.1"), ["error:8"]);
+}
+
+#[test]
+fn junction_deviation_writes_change_the_job_time() {
+    // A zigzag, so every corner is limited by $11.
+    let mut job = vec!["G90".to_owned(), "G0 X0 Y0".to_owned(), "M4 S500".to_owned(), "G1 F6000".to_owned()];
+    for i in 1..=40 {
+        job.push(format!("G1 X{} Y{}", i * 2, if i % 2 == 0 { 0 } else { 2 }));
+    }
+    job.extend(["M5".to_owned(), "M2".to_owned()]);
+    let (server, sink) = start(Pacing::Instant);
+    let mut c = Client::connect(server.address());
+    assert!(c.stream_send_response(&job).iter().all(|r| r == "ok"));
+    let (tight, _) = sink.verified_job(1);
+    c.wait_state("Idle");
+    assert_eq!(c.command("$11=0.5"), ["ok"]);
+    assert!(c.stream_send_response(&job).iter().all(|r| r == "ok"));
+    let (loose, _) = sink.verified_job(2);
+    assert!(loose.duration_s < tight.duration_s * 0.9, "{} vs {}", loose.duration_s, tight.duration_s);
+    let mut settings = GrblSettings::new(profile());
+    settings.set(11, 0.5).unwrap();
+    let planned = plan_job(&sink.job_loaded(2), &settings, &mut |_, _| {});
+    assert!((loose.duration_s - planned).abs() < 1e-6, "{} vs {planned}", loose.duration_s);
+}
+
+#[test]
+fn feed_hold_decelerates_before_it_reports_hold_complete() {
+    let (server, _sink) = start(Pacing::Realtime);
+    let mut c = Client::connect(server.address());
+    // 100 mm/s: 0.1 s and 5 mm to stop at 1000 mm/s².
+    assert_eq!(c.command("G1 X200 F6000"), ["ok"]);
+    thread::sleep(Duration::from_millis(400));
+    c.send(b"!?");
+    let decelerating = Status::parse(&c.line());
+    assert_eq!(decelerating.state, "Hold:1");
+    let held = c.wait_state("Hold:0");
+    assert!(held.pos.0 > decelerating.pos.0 + 2.0, "{:?} → {:?}", decelerating.pos, held.pos);
+    assert_eq!(held.feed, 0.0);
+    c.send(b"~");
+    c.wait_state("Idle");
+}
+
+#[test]
+fn spindle_syncs_and_dwells_stop_motion() {
+    // X0 → X10 → X20 at 100 mm/s, then a rapid back. Through X10 without a stop
+    // that's 0.3 s (two 5 mm ramps and 10 mm of cruise); stopping at X10 adds 0.1 s.
+    let job = |middle: &str| {
+        ["G90", "M3 S500 G1 F6000", "G1 X10", middle, "G1 X20", "M5", "G0 X0", "M2"].map(str::to_owned).to_vec()
+    };
+    let (server, sink) = start(Pacing::Instant);
+    let mut c = Client::connect(server.address());
+    let mut id = 0;
+    let mut time = |c: &mut Client, middle: &str| {
+        assert!(c.stream_send_response(&job(middle)).iter().all(|r| r == "ok"));
+        id += 1;
+        let (done, _) = sink.verified_job(id);
+        c.wait_state("Idle");
+        done.duration_s
+    };
+    // The rapid back: 20 mm, a triangle at 1000 mm/s².
+    let rapid = 2.0 * (20.0f64 / 1000.0).sqrt();
+    let close = |a: f64, b: f64| (a - b).abs() < 1e-9;
+    // An S change on a motion line rides along in laser mode: no stop.
+    let t = time(&mut c, "G1 X15 S800");
+    assert!(close(t, 0.3 + rapid), "{t}");
+    // On its own line it syncs.
+    let t = time(&mut c, "S800");
+    assert!(close(t, 0.4 + rapid), "{t}");
+    // M3 → M4 always syncs.
+    let t = time(&mut c, "M4");
+    assert!(close(t, 0.4 + rapid), "{t}");
+    // G4 syncs, then waits.
+    let t = time(&mut c, "G4 P0.5");
+    assert!(close(t, 0.9 + rapid), "{t}");
 }

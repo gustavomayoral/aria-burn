@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Dummy motion-sample stream: stands in for the GRBL planner port (COD-255)
-//! until it lands, so the Rust → webview path can be exercised end to end.
+//! Dummy motion-sample stream for the IPC smoke test: a fixed synthetic raster,
+//! so the Rust → webview path can be measured end to end without a job.
 //!
 //! Samples go out as binary batches (sample-batch layout) on one Channel and
 //! contract events (plan.started / plan.done) as JSON on another, per COD-252:

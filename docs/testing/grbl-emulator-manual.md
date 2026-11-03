@@ -26,20 +26,20 @@ Watch three places while testing:
    - the top bar says `Sender connected from 127.0.0.1:…`.
 3. In the console, type `$I`, `$$`, `$G` and `?`. Expected:
    - `$I` returns `[VER:1.1h.20190825:Laser Sim]` and `[OPT:V,15,128]`;
-   - `$$` lists the settings, with `$30` and `$32` taken from the machine profile;
+   - `$$` lists the settings, with `$11`, `$30`, `$32` and `$110`–`$131` taken from the machine profile;
    - `?` returns `<Idle|MPos:…>`.
 
 ## 2. LightBurn: jobs (Real time pacing)
 1. **Vector:** a 30 mm square and a 20 mm circle, Line mode, 1000 mm/min, 50 %. Start the job.
    - Progress advances at machine speed, and the preview builds live.
    - At the end, the info panel shows `plan.done ✓`.
-   - The job duration is close to LightBurn's estimate. The interim planner is approximate until COD-255; write down the difference.
+   - The job duration matches LightBurn's estimate closely (the planner is GRBL's, COD-255). Write down both numbers.
 2. **Raster:** a 20 × 20 mm image, 0.1 mm interval, 3000 mm/min. Run it twice, once with Grayscale and once with Dither. Same checks as the vector job. Bright areas burn less, and M4 rows fade at the row ends.
 3. **Frame:** the head moves and the preview does **not** change or clear.
 4. **Jog:** use the arrow buttons. LightBurn and the info panel both show the new position.
 
 ## 3. LightBurn: hold, resume, stop
-1. Start the raster, then click **Pause**. The state shows `Hold` and the preview stops growing.
+1. Start the raster, then click **Pause**. The head slows to a stop along the path (`Hold:1`, then `Hold:0`) and the preview stops growing.
 2. Click **Resume**. The job continues where it stopped.
 3. Click **Stop** mid-job. Record exactly what LightBurn shows, including whether `ALARM:3` appears.
    - If an alarm appears, **Unlock** (`$X`) clears it.
@@ -63,11 +63,14 @@ Watch three places while testing:
 1. *Grbl → Settings*: set the protocol to **Telnet** and the address to `127.0.0.1:2323`, then connect. The banner shows. LaserGRBL may send a soft reset (Ctrl-X) on connect, which is fine.
 2. Repeat section 2 (one raster and one vector job) twice: once with streaming mode **Buffered** and once with **Synchronous**.
 3. Use the feed and power **override** sliders during a job.
-   - Feed changes apply from the next move.
-   - Power changes show in the preview.
+   - Feed changes apply at once: the head slows down or speeds up mid-move.
+   - Power changes show in the preview. With M4, a lower feed override also lowers power (GRBL scales by programmed feed).
 4. Try Pause/Resume and Abort, as in section 3.
 5. Check the console for stray extra `ok`s. Those would mean CRLF line endings, which GRBL answers twice.
-6. Open *Grbl Configuration*. It reads `$$`. Writing settings returns `ok`, but only `$10` changes behaviour until COD-255.
+6. Open *Grbl Configuration*. It reads `$$`. Change `$11` and `$120` and write them.
+   - Each write returns `ok`, and the app's Settings screen shows the new values (they are saved with the machine profile).
+   - A negative value returns `error:4`.
+   - Writes to other settings (`$100`, `$31`, …) are kept until the app quits and are not part of the profile.
 
 ## 7. Network and errors
 1. Set Bind address to **All interfaces**, Save, and accept the OS firewall prompt. Connect LightBurn from another machine to `<this machine's LAN IP>:2323` and run a small job.
@@ -81,11 +84,11 @@ Watch three places while testing:
 ## Reporting
 For each step, note pass/fail, the OS, the sender and its version, and any sender console output that looks wrong. Add the results to the issue, along with the saved G-code files for COD-269.
 
-## Known interim behaviour (not bugs until COD-255)
-- Feed hold stops at once (always `Hold:0`).
-- Overrides apply from the next block.
+## Known limitations
 - The work offset (WCO) is always 0.
 - `$C`, `$SLP` and `$RST` give `error:3`.
 - `$G` is approximate.
+- `$12` (arc tolerance) applies from the next connect or reset.
+- A stationary laser (M3 during a sync or G4 dwell) doesn't burn in the preview.
 - The preview is a 60 × 50 mm window centred where the job starts burning. Larger jobs are clipped until COD-264's live tiling is wired in.
 - A job streamed straight after M2, with no idle gap, merges into the previous job.

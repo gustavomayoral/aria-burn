@@ -5,17 +5,20 @@
 //!
 //! - [`machine`]: the GRBL controller as a pure state machine (bytes and time in,
 //!   replies and webview traffic out).
-//! - [`planner`]: interim trapezoid planner and sampler behind the [`planner::Planner`]
-//!   trait, until the GRBL planner port (COD-255) replaces it.
+//! - [`planner`]: the GRBL 1.1h planner port (COD-255) and sampler, behind the
+//!   [`planner::Planner`] trait; [`planner::plan_job`] runs a whole parsed job.
+//! - [`settings`]: the emulated `$` settings, backed by the machine profile.
 //! - [`server`]: the TCP server and its threads.
 
 pub mod machine;
 pub mod planner;
 pub mod protocol;
 pub mod server;
+pub mod settings;
 
 pub use machine::{Machine, MachineConfig, Output, Pacing};
 pub use server::{ConnectionStatus, Server, ServerConfig, Sink, UiMessage};
+pub use settings::GrblSettings;
 
 /// The core's provisional 10 W diode profile, for tests.
 #[cfg(test)]

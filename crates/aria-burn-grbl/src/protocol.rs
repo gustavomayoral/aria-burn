@@ -39,7 +39,9 @@ pub mod rt {
 /// GRBL 1.1 `error:N` codes the emulator itself raises (the parser has its own).
 pub mod error {
     pub const INVALID_STATEMENT: u8 = 3;
+    pub const NEGATIVE_VALUE: u8 = 4;
     pub const SETTING_DISABLED: u8 = 5;
+    pub const SETTING_STEP_PULSE_MIN: u8 = 6;
     pub const IDLE_ERROR: u8 = 8;
     pub const SYSTEM_GC_LOCK: u8 = 9;
     pub const OVERFLOW: u8 = 11;
@@ -49,51 +51,6 @@ pub mod error {
 
 /// ALARM:3, reset while in motion.
 pub const ALARM_ABORT_CYCLE: u8 = 3;
-
-/// GRBL 1.1 `$` settings in `$$` order, with GRBL's defaults. The profile-backed
-/// ones ($11, $30, $32, $110/$111, $120/$121, $130/$131) are filled from the
-/// machine profile. Placeholder until COD-255 emulates `$` settings for real.
-pub const DEFAULT_SETTINGS: &[(u16, f64)] = &[
-    (0, 10.0),
-    (1, 25.0),
-    (2, 0.0),
-    (3, 0.0),
-    (4, 0.0),
-    (5, 0.0),
-    (6, 0.0),
-    (10, 1.0),
-    (11, 0.010),
-    (12, 0.002),
-    (13, 0.0),
-    (20, 0.0),
-    (21, 0.0),
-    (22, 0.0),
-    (23, 0.0),
-    (24, 25.0),
-    (25, 500.0),
-    (26, 250.0),
-    (27, 1.0),
-    (30, 1000.0),
-    (31, 0.0),
-    (32, 1.0),
-    (100, 80.0),
-    (101, 80.0),
-    (102, 250.0),
-    (110, 500.0),
-    (111, 500.0),
-    (112, 500.0),
-    (120, 10.0),
-    (121, 10.0),
-    (122, 10.0),
-    (130, 200.0),
-    (131, 200.0),
-    (132, 200.0),
-];
-
-/// Settings GRBL prints as integers; the rest get three decimals.
-pub fn is_integer_setting(n: u16) -> bool {
-    matches!(n, 0..=6 | 10 | 13 | 20..=23 | 26 | 30..=32)
-}
 
 pub const OFFSETS_REPORT: &str = "[G54:0.000,0.000,0.000]\r\n[G55:0.000,0.000,0.000]\r\n[G56:0.000,0.000,0.000]\r\n\
 [G57:0.000,0.000,0.000]\r\n[G58:0.000,0.000,0.000]\r\n[G59:0.000,0.000,0.000]\r\n[G28:0.000,0.000,0.000]\r\n\
@@ -116,9 +73,10 @@ pub fn stored_len(line: &[u8]) -> usize {
     n
 }
 
-/// True if a G-code line ends the program (M2 / M30).
-pub fn is_program_end(line: &[u8]) -> bool {
-    let mut letters = Vec::new();
+/// A line's words as (letter, value), comments and spaces dropped. Words that
+/// don't parse are skipped: the G-code parser has already judged the line.
+fn words(line: &[u8]) -> Vec<(u8, f64)> {
+    let mut text = Vec::new();
     let mut in_paren = false;
     for &b in line {
         match b {
@@ -127,21 +85,36 @@ pub fn is_program_end(line: &[u8]) -> bool {
             b'(' => in_paren = true,
             b';' => break,
             b if b.is_ascii_whitespace() => {}
-            b => letters.push(b.to_ascii_uppercase()),
+            b => text.push(b.to_ascii_uppercase()),
         }
     }
-    let text = String::from_utf8_lossy(&letters).into_owned();
-    let mut rest = text.as_str();
-    while let Some(i) = rest.find('M') {
-        rest = &rest[i + 1..];
-        let end = rest.find(|c: char| !(c.is_ascii_digit() || c == '.')).unwrap_or(rest.len());
-        if let Ok(v) = rest[..end].parse::<f64>()
-            && (v == 2.0 || v == 30.0)
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < text.len() {
+        let letter = text[i];
+        let start = i + 1;
+        i = start;
+        while i < text.len() && (text[i].is_ascii_digit() || matches!(text[i], b'.' | b'-' | b'+')) {
+            i += 1;
+        }
+        if letter.is_ascii_alphabetic()
+            && let Some(v) = std::str::from_utf8(&text[start..i]).ok().and_then(|n| n.parse::<f64>().ok())
         {
-            return true;
+            out.push((letter, v));
         }
     }
-    false
+    out
+}
+
+/// True if a G-code line ends the program (M2 / M30).
+pub fn is_program_end(line: &[u8]) -> bool {
+    words(line).iter().any(|&(l, v)| l == b'M' && (v == 2.0 || v == 30.0))
+}
+
+/// The dwell a `G4 P…` line asks for (s). GRBL's P is in seconds.
+pub fn dwell_s(line: &[u8]) -> Option<f64> {
+    let w = words(line);
+    w.iter().any(|&(l, v)| l == b'G' && v == 4.0).then(|| w.iter().find(|(l, _)| *l == b'P').map_or(0.0, |w| w.1))
 }
 
 #[cfg(test)]
@@ -161,5 +134,13 @@ mod tests {
         assert!(is_program_end(b"M02"));
         assert!(!is_program_end(b"M3 S20"));
         assert!(!is_program_end(b"(M2) M5"));
+    }
+
+    #[test]
+    fn dwell() {
+        assert_eq!(dwell_s(b"G4 P0.5"), Some(0.5));
+        assert_eq!(dwell_s(b"g4p2 ; wait"), Some(2.0));
+        assert_eq!(dwell_s(b"G40 P1"), None);
+        assert_eq!(dwell_s(b"G1 X4"), None);
     }
 }

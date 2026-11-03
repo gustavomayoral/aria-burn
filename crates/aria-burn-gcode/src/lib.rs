@@ -267,6 +267,11 @@ impl Parser {
         self.pos
     }
 
+    /// Modal M3/M4/M5 and S after the last parsed line (the emulator's spindle syncs).
+    pub fn laser_state(&self) -> (LaserMode, f64) {
+        (self.modal.laser, self.modal.s)
+    }
+
     /// Renames the job being parsed (the emulator names network jobs as they start).
     pub fn set_name(&mut self, name: impl Into<String>) {
         self.name = name.into();

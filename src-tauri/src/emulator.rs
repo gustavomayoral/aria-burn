@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Tauri side of the GRBL network emulator (crate `aria-burn-grbl`): starts and
 //! stops the server from the network settings, and forwards its traffic to the
-//! webview on three Channels: contract events (JSON `ChannelEvent`), binary
-//! sample batches, and the connection state.
+//! webview on four Channels: contract events (JSON `ChannelEvent`), binary
+//! sample batches, the connection state, and machine profiles changed by a
+//! sender's `$x=` writes (the profile is the emulated `$` settings, COD-255).
 //!
 //! The connection state and the emulator settings are app-local types for now:
 //! the contract's `emulator.set` command has no bind address or pacing, and
@@ -53,6 +54,7 @@ struct Subscribers {
     events: Channel<ChannelEvent>,
     batches: Channel<InvokeResponseBody>,
     status: Channel<ConnectionStatus>,
+    profile: Channel<MachineProfile>,
     seq: u32,
 }
 
@@ -84,6 +86,9 @@ impl Sink for ChannelSink {
             }
             UiMessage::Connection(status) => {
                 let _ = subs.status.send(status);
+            }
+            UiMessage::Profile(profile) => {
+                let _ = subs.profile.send(*profile);
             }
         }
     }
@@ -138,15 +143,17 @@ impl EmulatorState {
 }
 
 /// Connects the webview's Channels. The event channel opens with `hello`, and
-/// the status channel gets the current state at once.
+/// the status channel gets the current state at once. `profile` carries the
+/// machine profile whenever a sender's `$x=` write changes it.
 #[tauri::command]
 pub fn emulator_subscribe(
     state: State<'_, Arc<EmulatorState>>,
     events: Channel<ChannelEvent>,
     batches: Channel<InvokeResponseBody>,
     status: Channel<ConnectionStatus>,
+    profile: Channel<MachineProfile>,
 ) {
-    let mut subs = Subscribers { events, batches, status, seq: 0 };
+    let mut subs = Subscribers { events, batches, status, profile, seq: 0 };
     ChannelSink::send_event(
         &mut subs,
         Event::HelloEvent(HelloEvent {
