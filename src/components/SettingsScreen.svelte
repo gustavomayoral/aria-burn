@@ -151,7 +151,7 @@
             <input type="number" min="0.001" step="0.001" value={m.junctionDeviationMm} onchange={(e) => (m.junctionDeviationMm = num(e))} />
           </label>
         </div>
-        <p class="note">Grid pitch {pitchMm.toFixed(4)} mm (spot σ ÷ 3). Tiling follows each job’s burn area, not the bed: up to {TILE_MAX_CELLS} × {TILE_MAX_CELLS} cells (about {tileMm.toFixed(0)} × {tileMm.toFixed(0)} mm at this pitch) renders as one tile; larger jobs are split into tiles.</p>
+        <p class="note">Detail pitch {pitchMm.toFixed(4)} mm (spot σ ÷ 3), used when zoomed in and for the hover readout. On GPUs that can't render a large job at this pitch quickly (integrated Intel graphics), the full-job overview uses a whole multiple of it. Tiling follows each job’s burn area, not the bed: up to {TILE_MAX_CELLS} × {TILE_MAX_CELLS} cells (about {tileMm.toFixed(0)} × {tileMm.toFixed(0)} mm at the detail pitch) renders as one tile; larger jobs are split into tiles.</p>
       </section>
 
       <section>

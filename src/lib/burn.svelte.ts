@@ -4,10 +4,12 @@
 // hover reader and the burn view (COD-259), and decides what to run:
 //   coarse  scrub drags, playback and live streaming: the ≤ 1024² preview
 //   full    job load, scrub release, live plan.done: every tile at full res
-//   detail  zoomed past the overview's resolution: a 1:1 window of the grid
+//   detail  zoomed past the overview's resolution: a 1:1 window at the detail pitch
 // Nothing runs per frame. Runs happen on change, and draws only redraw.
 // Full runs plan their tiles with GlSim.fit (the GPU byte budget, BURN-36),
-// and a lost WebGL context is rebuilt and re-run in place (BURN-39).
+// and a lost WebGL context is rebuilt and re-run in place (BURN-39). The job
+// grid's pitch is coarsened to fit the GPU's cell budget (GlSim.cellBudget);
+// the detail view and the hover readout stay at the σ/3 detail pitch (BURN-37).
 
 import {
   CellReader,
@@ -19,6 +21,8 @@ import {
   SampleStore,
   Verdict,
   decodeSampleBatch,
+  detailGrid,
+  detailSetup,
   fireSpots,
   overviewLayer,
   peakTemperatureModel,
@@ -65,6 +69,8 @@ export interface GridInfo {
   widthMm: number
   heightMm: number
   pitchMm: number
+  /** Pitch of the detail view and hover (σ/3); pitchMm is a whole multiple of it on a budgeted GPU. */
+  detailPitchMm: number
   cells: [number, number]
   tiles: [number, number]
   /** Tile cores in mm, for the minimap. */
@@ -152,6 +158,8 @@ class BurnEngine {
   private burn: GlBurnView | null = null
   private store: SampleStore | null = null
   private setup: SimSetup | null = null
+  /** Cell budget the setup was planned with (Infinity before a GPU exists). */
+  private setupCellBudget = Infinity
   private reader: CellReader | null = null
   private live: LiveJob | null = null
   private machine: MachineProfile | null = null
@@ -208,6 +216,8 @@ class BurnEngine {
       this.sim = new GlSim(this.gl)
       this.burn = new GlBurnView(this.sim)
       this.glError = null
+      // The job grid's pitch depends on this GPU's cell budget (BURN-37).
+      if (this.setup && this.setupCellBudget !== this.sim.cellBudget) this.rebuildSetup()
     } catch (e) {
       if (e instanceof GlContextLostError || this.gl.isContextLost()) return false
       this.glError = String(e instanceof Error ? e.message : e)
@@ -445,6 +455,9 @@ class BurnEngine {
         job.durationS = e.durationS
         this.headS = live.headS()
         if (live.store.count !== e.sampleCount) job.mismatch = `${live.store.count}/${e.sampleCount} samples arrived`
+        // A live refresh still pending would run a coarse pass after the full one and hide it.
+        if (this.liveTimer) clearTimeout(this.liveTimer)
+        this.liveTimer = null
         this.rebuildSetup()
         // The job is complete: full resolution at whatever cutoff the scrub shows.
         if (this.follow) this.progress = 1
@@ -581,15 +594,15 @@ class BurnEngine {
     this.setView({ centerXMm: g.originXMm + (g.width * g.pitchMm) / 2, centerYMm: g.originYMm + (g.height * g.pitchMm) / 2, mmPerPx: this.fitMmPerPx }, false)
   }
 
-  /** Smallest mm per CSS pixel allowed. */
+  /** Smallest mm per CSS pixel allowed (the detail view goes to the detail pitch). */
   get minMmPerPx(): number {
-    const pitch = this.setup?.grid.pitchMm ?? 0.01
+    const pitch = this.setup?.detailPitchMm ?? 0.01
     return pitch / (MAX_DEVICE_PX_PER_CELL / this.dpr)
   }
 
-  /** mm per CSS pixel at which one grid cell is one device pixel (1:1 grid pitch). */
+  /** mm per CSS pixel at which one detail cell is one device pixel (1:1 at the detail pitch). */
   get pitchMmPerPx(): number {
-    return (this.setup?.grid.pitchMm ?? 0.01) * this.dpr
+    return (this.setup?.detailPitchMm ?? 0.01) * this.dpr
   }
 
   setView(v: View, user = true): void {
@@ -655,7 +668,16 @@ class BurnEngine {
     if (!this.burn || !this.setup || this.coarseShown) return false
     const full = overviewLayer(this.burn.full)
     if (!full) return false
-    return this.view.mmPerPx / this.dpr < full.texelMm * 0.999
+    if (this.view.mmPerPx / this.dpr >= full.texelMm * 0.999) return false
+    // One region tile: skip the detail run while the view is too big for the tile budget (the overview stays).
+    const rect = this.detailRect()
+    return !!rect && (!this.sim || Math.max(rect.width, rect.height) <= this.sim.tileSide(this.store ?? undefined))
+  }
+
+  /** Detail-grid cells the canvas shows. */
+  private detailRect() {
+    if (!this.setup || !this.canvas || !this.canvasSize.width) return null
+    return visibleCells(detailGrid(this.setup), this.deviceView(), this.canvas.width, this.canvas.height)
   }
 
   /** Head position at the cutoff: the last sample that has burned. */
@@ -717,12 +739,14 @@ class BurnEngine {
     // Live jobs tile on the absolute lattice until job.loaded (contract live.ts), like LiveJob.setup().
     const model = this.live ? this.live.job : this.job?.model
     const bounds = model?.burnBounds ?? store.burnBounds
-    this.setup = bounds ? setupJob(bounds, this.machine, this.material, { tiling: this.live && !model ? 'live' : 'regular' }) : null
+    const cellBudget = (this.setupCellBudget = this.sim?.cellBudget ?? Infinity)
+    this.setup = bounds ? setupJob(bounds, this.machine, this.material, { tiling: this.live && !model ? 'live' : 'regular', cellBudget }) : null
     const setup = this.setup
     if (!setup) return false
     const { grid } = setup
-    if (this.reader) this.reader.setSetup(setup)
-    else this.reader = new CellReader(store, setup)
+    // Hover reads at the detail pitch, the resolution the zoomed view shows (BURN-37).
+    if (this.reader) this.reader.setSetup(detailSetup(setup))
+    else this.reader = new CellReader(store, detailSetup(setup))
     this.setGrid(setup)
     return !before || before.width !== grid.width || before.height !== grid.height || before.originXMm !== grid.originXMm
   }
@@ -730,7 +754,7 @@ class BurnEngine {
   /** A plan that fits the GPU (GlSim.fit, or the one a full run fell back to) replaces the setup's. */
   private adoptPlan(setup: SimSetup): void {
     this.setup = setup
-    this.reader?.setSetup(setup)
+    this.reader?.setSetup(detailSetup(setup))
     this.setGrid(setup)
   }
 
@@ -740,6 +764,7 @@ class BurnEngine {
       widthMm: grid.width * grid.pitchMm,
       heightMm: grid.height * grid.pitchMm,
       pitchMm: grid.pitchMm,
+      detailPitchMm: setup.detailPitchMm,
       cells: [grid.width, grid.height],
       tiles: [plan.cols, plan.rows],
       tileRects: plan.tiles.map((t) => ({
@@ -803,8 +828,7 @@ class BurnEngine {
         }
         if (p.detail) {
           p.detail = false
-          const grid = setup.grid
-          const rect = this.canvasSize.width ? visibleCells(grid, this.deviceView(), this.canvas!.width, this.canvas!.height) : null
+          const rect = this.detailRect()
           const run = setup
           if (rect && this.wantsDetail()) this.times.detail = this.timed(() => burn.runDetail(store, run, rect, this.cutoffS()))
           this.rendering = false

@@ -266,7 +266,7 @@
         <span>{zoomLabel}</span>
         <button aria-label="Zoom in" disabled={atMaxZoom} onclick={() => burn.zoomAt(2)}>+</button>
         <button class="text" onclick={() => burn.fit()}>Fit</button>
-        <button class="text" title="One grid cell per screen pixel ({burn.grid?.pitchMm.toFixed(4)} mm)" onclick={() => burn.setView({ ...burn.view, mmPerPx: burn.pitchMmPerPx })}
+        <button class="text" title="One detail cell per screen pixel ({burn.grid?.detailPitchMm.toFixed(4)} mm)" onclick={() => burn.setView({ ...burn.view, mmPerPx: burn.pitchMmPerPx })}
           >1:1</button
         >
       </div>

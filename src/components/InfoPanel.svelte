@@ -142,7 +142,7 @@
     <div class="section-label">Job</div>
     <div class="kv">
       <span>Bounds</span><span>{ready ? bounds : '—'}</span>
-      <span>Grid pitch</span><span>{burn.grid ? `${(burn.grid.pitchMm * 1000).toFixed(1)} µm` : '—'}</span>
+      <span>Grid pitch</span><span title="Overview pitch; zoomed-in detail and hover use the detail pitch (BURN-37)">{burn.grid ? (burn.grid.pitchMm > burn.grid.detailPitchMm * 1.001 ? `${(burn.grid.pitchMm * 1000).toFixed(1)} µm (detail ${(burn.grid.detailPitchMm * 1000).toFixed(1)} µm)` : `${(burn.grid.pitchMm * 1000).toFixed(1)} µm`) : '—'}</span>
       <span>Grid</span><span>{burn.grid && ready ? `${burn.grid.cells[0].toLocaleString('en-US')} × ${burn.grid.cells[1].toLocaleString('en-US')}` : '—'}</span>
       <span>Tiles</span><span>{burn.grid && ready ? (burn.grid.tileRects.length > 1 ? `${burn.grid.tiles[0]} × ${burn.grid.tiles[1]}` : '1 (untiled)') : '—'}</span>
       <span>Power mode</span><span>{ready ? powerMode : '—'}</span>
@@ -150,7 +150,7 @@
       <span>{job?.kind === 'live' && job.durationS === null ? 'Streamed' : 'Est. time'}</span><span>{ready ? fmtDuration(burn.totalS) : '—'}</span>
       {#if job?.kind === 'live'}<span>Samples</span><span>{job.samples.toLocaleString('en-US')}</span>{/if}
     </div>
-    <p class="note">Timing from the GRBL planner{job?.kind === 'file' ? ' (same as streaming it)' : ''}. Pitch = spot σ ÷ 3; jobs over 9000 cells a side tile.</p>
+    <p class="note">Timing from the GRBL planner{job?.kind === 'file' ? ' (same as streaming it)' : ''}. Detail pitch = spot σ ÷ 3; the overview may use a multiple of it to stay fast on this GPU. Large jobs split into tiles.</p>
   </div>
 
   {#if app.source === 'live'}
