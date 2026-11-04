@@ -500,8 +500,12 @@ class BurnEngine {
 
   /**
    * Live refresh, throttled to the cost of the last run: the next one waits at
-   * least twice as long as the last took, so the GPU is busy ≤ 1/3 of the time
-   * (thermal materials rerun the thermal step on every refresh, COD-258).
+   * least twice as long as the last took, so the GPU is busy ≤ 1/3 of the time.
+   * On thermal materials the live setup (live tiling) gives the core's live
+   * thermal plan, so a refresh only steps the thermal grid over the new bins
+   * (BURN-35). It reruns in full only when that plan changes (the bounds cross
+   * a block edge, the duration doubles), on a new material or machine, after a
+   * missing batch, and once job.loaded switches to the job plan.
    */
   private scheduleLive(): void {
     if (this.liveTimer) return
