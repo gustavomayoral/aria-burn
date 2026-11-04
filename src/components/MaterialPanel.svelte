@@ -2,9 +2,14 @@
 <script lang="ts">
   import type { MaterialProfile } from 'aria-burn-core/contract'
   import { app } from '../lib/app.svelte.ts'
+  import { calibration } from '../lib/calibration.svelte.ts'
+  import { settingsFor } from '../lib/material-settings.ts'
   import { KIND_LABEL, MATERIALS, findMaterial, labToCss } from '../lib/materials.ts'
 
   const selected = $derived(findMaterial(app.settings.ui.materialId))
+  /** Settings picked from calibration patterns for this material (BURN-32). */
+  const saved = $derived(settingsFor(calibration.library, selected.id))
+  const pct = (v: number) => (v >= 10 ? v.toFixed(0) : v.toFixed(1))
 
   function pick(m: MaterialProfile) {
     app.settings.ui.materialId = m.id
@@ -55,7 +60,27 @@
     {#if selected.provenance.source === 'provisional'}
       <p class="note">Provisional profiles from published data, not yet validated against real burns. Treat predictions as approximate.</p>
     {/if}
-    <button class="btn wide" disabled>Calibrate from test grid… (coming later)</button>
+    <button class="btn wide" onclick={() => (calibration.open = true)}>Test patterns…</button>
+  </div>
+  <div>
+    <div class="section-label">Your settings</div>
+    {#if saved.length}
+      <ul class="saved">
+        {#each saved as s (s.id)}
+          <li>
+            <span class="text">
+              <span class="name">{s.name}</span>
+              <span class="kind"
+                >{pct(s.powerPct)}% · {s.feedMmPerMin} mm/min{s.intervalMm ? ` · ${s.intervalMm} mm` : ''} · {s.machine.name}</span
+              >
+            </span>
+            <button class="btn small" aria-label="Delete {s.name}" onclick={() => calibration.remove(s.id)}>Delete</button>
+          </li>
+        {/each}
+      </ul>
+    {:else}
+      <p class="note">None yet. Burn a test pattern, then click the cell that looked best to keep its power and speed.</p>
+    {/if}
   </div>
   <details>
     <summary>Advanced thresholds</summary>
@@ -122,6 +147,23 @@
     font-size: var(--text-2xs);
     line-height: var(--leading-2xs);
     color: var(--fg-muted);
+  }
+  .saved {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .saved li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 8px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
   }
   .wide {
     width: 100%;

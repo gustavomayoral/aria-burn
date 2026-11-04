@@ -3,12 +3,14 @@
   import { onMount } from 'svelte'
   import { app } from '../lib/app.svelte.ts'
   import { burn } from '../lib/burn.svelte.ts'
+  import { calibration } from '../lib/calibration.svelte.ts'
   import { describeConnection } from '../lib/emulator.ts'
   import { exportColor, exportHeight } from '../lib/export.ts'
   import { isTauri } from '../lib/ipc.ts'
   import { findMaterial } from '../lib/materials.ts'
   import type { ViewMode } from '../lib/settings.ts'
   import { scaleBar } from '../lib/verdicts.ts'
+  import BestCellCard from './BestCellCard.svelte'
 
   const VIEW_MODES: { id: ViewMode; label: string }[] = [
     { id: 'color', label: 'Color' },
@@ -114,6 +116,19 @@
     }
     const p = local(e)
     burn.hoverAt(p.x, p.y)
+    if (calibration.active) {
+      const m = burn.toMm(p.x, p.y)
+      calibration.hoverAt(m.xMm, m.yMm)
+    }
+  }
+  /** A click (no drag) on a calibration pattern picks the cell under it (BURN-32). */
+  function onUp(e: PointerEvent) {
+    if (drag && !drag.moved && calibration.active) {
+      const p = local(e)
+      const m = burn.toMm(p.x, p.y)
+      calibration.pickAt(m.xMm, m.yMm)
+    }
+    drag = null
   }
   function onWheel(e: WheelEvent) {
     if (!hasBurn || !isColor) return
@@ -142,6 +157,21 @@
   const atMaxZoom = $derived(burn.view.mmPerPx <= burn.minMmPerPx * 1.001)
   const bar = $derived(scaleBar(burn.view.mmPerPx))
   const hoverPx = $derived(burn.hover ? burn.toPx(burn.hover.xMm, burn.hover.yMm) : null)
+
+  /** Calibration cells to outline: the one under the pointer and the picked one, in CSS px. */
+  const cellBoxes = $derived.by(() => {
+    void burn.view
+    const p = calibration.active
+    if (!p || !hasBurn || !isColor) return []
+    const ids = [...new Set([calibration.hoverId, calibration.selectedId].filter((id): id is string => id !== null))]
+    return ids.flatMap((id) => {
+      const c = p.cells.find((k) => k.id === id)
+      if (!c) return []
+      const a = burn.toPx(c.rectMm.minXMm, c.rectMm.maxYMm)
+      const b = burn.toPx(c.rectMm.maxXMm, c.rectMm.minYMm)
+      return [{ id, left: a.x, top: a.y, width: b.x - a.x, height: b.y - a.y, selected: id === calibration.selectedId }]
+    })
+  })
 
   // Where the head is at the cutoff: the last sample burned. Only mid-job; the burn itself shows what's done.
   const marker = $derived.by(() => {
@@ -230,7 +260,7 @@
     tabindex="0"
     onpointerdown={onDown}
     onpointermove={onMove}
-    onpointerup={() => (drag = null)}
+    onpointerup={onUp}
     onpointerleave={() => burn.clearHover()}
     onwheel={onWheel}
     onkeydown={onKey}
@@ -254,6 +284,17 @@
       {#if hoverPx && !drag?.moved}
         <div class="cross" style:left="{hoverPx.x}px" style:top="{hoverPx.y}px" aria-hidden="true"></div>
       {/if}
+      {#each cellBoxes as box (box.id)}
+        <div
+          class="cell-box"
+          class:selected={box.selected}
+          style:left="{box.left}px"
+          style:top="{box.top}px"
+          style:width="{box.width}px"
+          style:height="{box.height}px"
+          aria-hidden="true"
+        ></div>
+      {/each}
       {#if marker}
         <div class="head" style:left="{marker.x}px" style:top="{marker.y}px" aria-hidden="true"></div>
       {/if}
@@ -280,6 +321,10 @@
           <span>Tile {tileAt >= 0 ? minimap.findIndex((t) => t.index === tileAt) + 1 : '—'} / {minimap.length} · ≤9000² cells</span>
         </div>
       {/if}
+    {/if}
+
+    {#if hasBurn && isColor}
+      <BestCellCard />
     {/if}
 
     {#if chip}
@@ -378,6 +423,15 @@
 <input bind:this={fileInput} type="file" accept=".gcode,.gc,.nc,.ngc,.txt" hidden onchange={onPick} />
 
 <style>
+  .cell-box {
+    position: absolute;
+    pointer-events: none;
+    border: 1px dashed var(--crosshair);
+    box-shadow: var(--shadow-outline);
+  }
+  .cell-box.selected {
+    border: 2px solid var(--accent);
+  }
   .toolbar {
     display: flex;
     align-items: center;

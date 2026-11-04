@@ -4,17 +4,20 @@
   import CanvasArea from './components/CanvasArea.svelte'
   import InfoPanel from './components/InfoPanel.svelte'
   import MaterialPanel from './components/MaterialPanel.svelte'
+  import PatternDialog from './components/PatternDialog.svelte'
   import SettingsScreen from './components/SettingsScreen.svelte'
   import Timeline from './components/Timeline.svelte'
   import TopBar from './components/TopBar.svelte'
   import { app } from './lib/app.svelte.ts'
   import { burn } from './lib/burn.svelte.ts'
+  import { calibration } from './lib/calibration.svelte.ts'
   import { launchFile, runSmoke, smokeConfig, smokeReport } from './lib/ipc.ts'
 
   let smokeRunning = $state(false)
 
   onMount(async () => {
     await app.load()
+    await calibration.load()
     // CI smoke mode (ARIA_BURN_SMOKE): stream, verify, report, and Rust exits.
     const smoke = await smokeConfig()
     if (smoke) {
@@ -30,6 +33,9 @@
 
 {#if app.screen === 'settings'}
   <SettingsScreen />
+{/if}
+{#if calibration.open}
+  <PatternDialog />
 {/if}
 <!-- Kept mounted behind the settings screen so the burn (and its GPU context) survives. -->
 <div class="shell" hidden={app.screen === 'settings'}>

@@ -7,12 +7,14 @@
 
 import { isTauri } from '@tauri-apps/api/core'
 import { MachineProfile, checkMachineProfile, validate, type MachineProfile as Machine } from 'aria-burn-core/contract'
+import { readMaterialSettings, settingProblems, type MaterialSettingsLibrary } from './material-settings.ts'
 import { PROFILE_FIELDS, defaultMachineEntry, readLibrary, type FieldSource, type MachineFieldStatus, type MachineLibrary } from './machines.ts'
 
 export const SETTINGS_VERSION = 1
 const STORE_FILE = 'settings.json'
 const KEY = 'settings'
 const LIBRARY_KEY = 'machines'
+const MATERIAL_SETTINGS_KEY = 'materialSettings'
 
 export type ViewMode = 'color' | 'height'
 
@@ -156,6 +158,19 @@ export async function saveLibrary(library: MachineLibrary): Promise<void> {
     if (problems.length) throw new Error(`machine “${m.name}” invalid: ${problems.join('; ')}`)
   }
   await (await getBackend()).write(LIBRARY_KEY, plainCopy(library))
+}
+
+/** Named material settings picked from calibration patterns (BURN-32). */
+export async function loadMaterialSettings(): Promise<{ library: MaterialSettingsLibrary; warnings: string[] }> {
+  return readMaterialSettings(await (await getBackend()).read(MATERIAL_SETTINGS_KEY))
+}
+
+export async function saveMaterialSettings(library: MaterialSettingsLibrary): Promise<void> {
+  for (const s of library.settings) {
+    const problems = settingProblems(s)
+    if (problems.length) throw new Error(`material setting “${s.name}” invalid: ${problems.join('; ')}`)
+  }
+  await (await getBackend()).write(MATERIAL_SETTINGS_KEY, plainCopy(library))
 }
 
 export async function saveSettings(settings: Settings): Promise<void> {
