@@ -1,105 +1,127 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-/* Palette and type from the COD-253 mock (dark workshop theme). */
+/* The Aria theme (BURN-29): Aria Studio's look, from @aria/theme. Layout follows the COD-253 mock. */
 :root {
   /* UI theme tokens. Every colour, font, type size, shadow and stacking level
-     the app's controls and panels use is here; components read only these
-     variables (src/lib/ui-tokens.test.ts enforces it). Values are the COD-253
-     mock's dark workshop palette; names follow Aria Studio's theme
-     (apps/aria-studio-ui/tailwind.config.js) so a restyle only changes values.
+     the app's controls and panels use is here, and components read only these
+     variables (src/lib/ui-tokens.test.ts enforces it). The shared look comes
+     from the Aria theme (@aria/theme, BURN-28): each name Aria Studio has is
+     mapped onto its --aria-* variable, never copied. The rest are Aria Burn's
+     own (status colours, canvas furniture), derived from the Aria ones where
+     they tint a theme colour.
      The burn render does not read them: material colours come from the
      profiles and the core's burn view. */
 
   /* Surfaces, from the bed up to what floats over the canvas. */
-  --bed: #1b1a18;
-  --panel: #242220;
-  --raised: #2c2a27;
-  --sunken: #141312;
-  --field: #0f0e0d;
-  --overlay: rgba(20, 19, 18, 0.85);
-  --scrim: rgba(20, 19, 18, 0.6);
+  --bed: var(--aria-bg-bed);
+  --panel: var(--aria-bg-panel);
+  --raised: var(--aria-bg-raised);
+  --field: var(--aria-bg-field);
+  --overlay: var(--aria-bg-overlay);
+  /* Behind the paper (the burn's stage) and under a drop target. */
+  --sunken: var(--aria-bg-bed);
+  --scrim: color-mix(in srgb, var(--aria-bg-bed) 60%, transparent);
+  /* The burn stage's paper: the "bed" the render sits on, never the render. */
+  --paper: var(--aria-bg-field);
 
   /* Borders. */
-  --line-subtle: #35322e;
-  --line: #3a3733;
-  --line-strong: #4a4640;
+  --line-subtle: var(--aria-line-subtle);
+  --line: var(--aria-line);
+  --line-strong: var(--aria-line-strong);
 
   /* Text. */
-  --fg-strong: #f2f0ec;
-  --fg: #c9c4bc;
-  --fg-muted: #a8a39c;
-  --fg-faint: #8f8a83;
+  --fg-strong: var(--aria-fg-strong);
+  --fg: var(--aria-fg);
+  --fg-muted: var(--aria-fg-muted);
+  --fg-faint: var(--aria-fg-faint);
 
-  /* Accent: active tabs, selection, primary buttons, links, focus. */
-  --accent: #e8793d;
-  --accent-hover: #f3975f;
-  --accent-deep: #c24f1f;
-  --accent-border: #e8793d;
-  --accent-text: #e8793d;
-  --accent-ring: #e8793d;
-  --accent-soft: rgba(232, 121, 61, 0.12);
-  --accent-track: rgba(232, 121, 61, 0.35);
-  --on-accent: #1b1a18;
+  /* Accent, the one cyan: active, selected and pressed, primary buttons, links, focus. */
+  --accent: var(--aria-accent);
+  --accent-hover: var(--aria-accent-hover);
+  --accent-border: var(--aria-accent-border);
+  --accent-text: var(--aria-accent-text);
+  --accent-ring: var(--aria-accent-ring);
+  --accent-soft: var(--aria-accent-soft);
+  --accent-track: color-mix(in srgb, var(--aria-accent-ring) 35%, transparent);
+  /* Text on a filled accent, danger or warn button (Aria Studio: text-white). */
+  --on-accent: #ffffff;
 
-  /* Status: danger (errors, disconnects), warn, ok, info, and fire risk. */
-  --danger: #e5484d;
-  --danger-text: #f3a2a5;
-  --danger-muted: #d79a9c;
-  --danger-border: rgba(229, 72, 77, 0.45);
-  --danger-soft: rgba(229, 72, 77, 0.08);
-  --warn: #e0a940;
-  --warn-text: #e8c57f;
-  --warn-muted: #d8c39a;
-  --warn-border: rgba(224, 169, 64, 0.45);
-  --warn-soft: rgba(224, 169, 64, 0.1);
-  --ok: #4caf7d;
-  --ok-text: #8fd6ab;
-  --ok-border: rgba(76, 175, 125, 0.35);
-  --ok-soft: rgba(76, 175, 125, 0.12);
-  --info: #4d91d6;
-  --info-soft: rgba(77, 145, 214, 0.15);
+  /* Status: danger (errors, disconnects) and warn from the theme; ok, info and fire risk are Aria Burn's. */
+  --danger: var(--aria-danger);
+  --danger-hover: var(--aria-danger-hover);
+  --danger-text: var(--aria-danger-text);
+  --danger-muted: color-mix(in srgb, var(--aria-danger-text) 75%, var(--aria-fg));
+  --danger-border: var(--aria-danger-border);
+  --danger-soft: color-mix(in srgb, var(--aria-danger) 12%, transparent);
+  --warn: var(--aria-warn);
+  --warn-text: var(--aria-warn-text);
+  --warn-muted: color-mix(in srgb, var(--aria-warn-text) 70%, var(--aria-fg));
+  --warn-border: var(--aria-warn-border);
+  --warn-soft: color-mix(in srgb, var(--aria-warn) 12%, transparent);
+  --ok: #10b981;
+  --ok-text: #6ee7b7;
+  --ok-border: #047857;
+  --ok-soft: color-mix(in srgb, var(--ok) 12%, transparent);
+  --info: #3b82f6;
+  --info-soft: color-mix(in srgb, var(--info) 15%, transparent);
+  /* Fire risk keeps the burn view's fire-verdict hue (aria-burn-core burn-view.ts), so banner and overlay agree. */
   --fire: #d6336c;
   --fire-text: #f5a3c0;
   --fire-muted: #e6b3c4;
-  --fire-border: rgba(214, 51, 108, 0.55);
-  --fire-soft: rgba(214, 51, 108, 0.1);
+  --fire-border: #be185d;
+  --fire-soft: color-mix(in srgb, var(--fire) 12%, transparent);
 
-  /* Canvas furniture drawn over the burn: crosshair, head marker, swatch edges, depth legend. */
+  /* Canvas furniture drawn over the burn: crosshair, head marker, swatch edges.
+     Neutral white and black, so they read over any material colour. */
   --crosshair: rgba(255, 255, 255, 0.75);
   --marker-core: #ffffff;
   --marker-glow: rgba(160, 200, 255, 0.9);
   --marker-fade: rgba(120, 170, 255, 0);
   --swatch-border: rgba(255, 255, 255, 0.15);
+  /* The depth legend matches the Depth view's grey ramp (core burn view), not the theme. */
   --depth-top: #9a9a9a;
   --depth-bottom: #2a2a2a;
 
-  /* Type: families and the size scale (Aria: 2xs/xs/ui/sm = 11/12/13/14 px). */
-  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
-  --font-condensed: var(--font-sans);
-  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
-  --text-2xs: 11px;
-  --text-xs: 12px;
-  --text-ui: 13px;
-  --text-sm: 14px;
-  --text-md: 15px;
-  --text-lg: 18px;
+  /* Type: IBM Plex Sans for text, Condensed for headings, tabs and control
+     labels, Mono for readouts; only the 11/12/13/14 px scale. */
+  --font-sans: var(--aria-font-sans);
+  --font-condensed: var(--aria-font-condensed);
+  --font-mono: var(--aria-font-mono);
+  --text-2xs: var(--aria-text-2xs);
+  --text-xs: var(--aria-text-xs);
+  --text-ui: var(--aria-text-ui);
+  --text-sm: var(--aria-text-sm);
+  --leading-2xs: var(--aria-text-2xs-line-height);
+  --leading-xs: var(--aria-text-xs-line-height);
+  --leading-ui: var(--aria-text-ui-line-height);
+  --leading-sm: var(--aria-text-sm-line-height);
+  /* Uppercase label tracking (Tailwind tracking-wide / tracking-wider). */
+  --tracking-wide: 0.025em;
+  --tracking-wider: 0.05em;
 
-  /* Shape, depth and stacking. */
-  --radius: 8px;
-  --focus-ring: 2px solid var(--accent-ring);
+  /* Shape (Tailwind rounded-sm / rounded / rounded-lg, as Aria Studio uses them). */
+  --radius-sm: 2px;
+  --radius: 4px;
+  --radius-lg: 8px;
+
+  /* Depth and stacking. */
+  --focus-ring: var(--aria-focus-ring);
+  --focus-ring-offset: var(--aria-focus-ring-offset);
+  --shadow-paper: var(--aria-shadow-paper);
+  --shadow-popup: var(--aria-shadow-paper);
   --shadow-text: 0 1px 2px rgba(0, 0, 0, 0.8);
   --shadow-outline: 0 0 2px rgba(0, 0, 0, 0.8);
   --shadow-hairline: 0 0 0 1px rgba(0, 0, 0, 0.4);
-  --shadow-paper: 0 20px 50px -20px rgba(0, 0, 0, 0.6);
-  --shadow-popup: 0 12px 30px rgba(0, 0, 0, 0.5);
-  --z-popup: 5;
-  --z-dialog: 30;
+  --z-dialog: var(--aria-z-dialog);
+  --z-picker: var(--aria-z-picker);
+  --z-alert: var(--aria-z-alert);
 
   color-scheme: dark;
   font-family: var(--font-sans);
   font-size: var(--text-ui);
-  line-height: 1.4;
-  color: var(--fg-strong);
+  line-height: var(--leading-ui);
+  color: var(--fg);
   background: var(--bed);
+  -webkit-font-smoothing: antialiased;
 }
 
 * {
@@ -118,6 +140,12 @@ body {
   overflow: hidden;
 }
 
+h1,
+h2,
+h3 {
+  font-family: var(--font-condensed);
+}
+
 button {
   font: inherit;
   color: inherit;
@@ -125,7 +153,7 @@ button {
 }
 
 button:disabled {
-  cursor: default;
+  cursor: not-allowed;
   opacity: 0.4;
 }
 
@@ -133,15 +161,18 @@ input,
 select,
 textarea {
   font: inherit;
+  font-family: var(--font-sans);
   color: var(--fg-strong);
+  accent-color: var(--accent-hover);
 }
 
 a {
-  color: var(--accent);
+  color: var(--accent-text);
+  text-underline-offset: 2px;
 }
 
 a:hover {
-  color: var(--accent-hover);
+  text-decoration: underline;
 }
 
 ::selection {
@@ -150,13 +181,16 @@ a:hover {
 
 :focus-visible {
   outline: var(--focus-ring);
-  outline-offset: 2px;
+  outline-offset: var(--focus-ring-offset);
 }
 
+/* A panel's section heading (Aria Studio: font-condensed text-2xs uppercase tracking-wider). */
 .section-label {
+  font-family: var(--font-condensed);
   font-size: var(--text-2xs);
+  line-height: var(--leading-2xs);
   font-weight: 600;
-  letter-spacing: 0.6px;
+  letter-spacing: var(--tracking-wider);
   text-transform: uppercase;
   color: var(--fg-muted);
   margin-bottom: 8px;
@@ -164,14 +198,17 @@ a:hover {
 
 .note {
   font-size: var(--text-xs);
+  line-height: var(--leading-xs);
   color: var(--fg-muted);
 }
 
+/* Label/value readouts: labels in the UI face, values in Mono. */
 .kv {
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 4px 12px;
   font-size: var(--text-xs);
+  line-height: var(--leading-xs);
 }
 
 .kv > :nth-child(odd) {
@@ -182,60 +219,70 @@ a:hover {
   text-align: right;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
+  color: var(--fg-strong);
 }
 
+/* Buttons (Aria Studio's dialog buttons): outlined, and the filled accent primary. */
 .btn {
-  background: var(--panel);
+  background: transparent;
   border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 6px 12px;
+  border-radius: var(--radius);
+  padding: 4px 12px;
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--fg);
 }
 
 .btn:hover:not(:disabled) {
-  border-color: var(--fg-faint);
+  border-color: var(--line-strong);
 }
 
 .btn.primary {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--on-accent);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .btn.primary:hover:not(:disabled) {
   background: var(--accent-hover);
+  border-color: var(--accent-hover);
 }
 
+/* Segmented toggles (Aria Studio's toggle look): pressed is the accent, off is outlined. */
 .seg {
   display: flex;
   gap: 4px;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 3px;
 }
 
 .seg button {
-  min-height: 32px;
-  border: 0;
+  min-height: 28px;
+  border: 1px solid var(--line);
   background: transparent;
-  border-radius: 6px;
-  padding: 0 14px;
-  font-size: var(--text-xs);
+  border-radius: var(--radius);
+  padding: 0 12px;
+  font-family: var(--font-condensed);
+  font-size: var(--text-ui);
   font-weight: 500;
   color: var(--fg);
 }
 
+.seg button:hover:not([aria-pressed='true']) {
+  border-color: var(--line-strong);
+  background: var(--raised);
+}
+
 .seg button[aria-pressed='true'] {
   background: var(--accent);
+  border-color: var(--accent-border);
   color: var(--on-accent);
-  font-weight: 600;
 }
 
 .callout {
   border-radius: var(--radius);
   padding: 10px 12px;
   font-size: var(--text-xs);
+  line-height: var(--leading-xs);
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -245,11 +292,21 @@ a:hover {
 .callout.warn {
   background: var(--warn-soft);
   border-color: var(--warn-border);
+  color: var(--warn-muted);
+}
+
+.callout.warn strong {
+  color: var(--warn-text);
 }
 
 .callout.danger {
   background: var(--danger-soft);
   border-color: var(--danger-border);
+  color: var(--danger-muted);
+}
+
+.callout.danger strong {
+  color: var(--danger-text);
 }
 
 .callout strong {

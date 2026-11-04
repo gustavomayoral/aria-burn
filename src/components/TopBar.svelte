@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <script lang="ts">
+  import ariaLogo from '@aria/theme/aria-logo.svg'
   import { app } from '../lib/app.svelte.ts'
   import { burn } from '../lib/burn.svelte.ts'
   import { describeConnection } from '../lib/emulator.ts'
@@ -32,7 +33,7 @@
 
 <header>
   <div class="brand">
-    <div class="logo" aria-hidden="true"></div>
+    <img class="logo" src={ariaLogo} alt="" width="28" height="28" draggable="false" />
     <span>Aria Burn</span>
   </div>
   <div class="seg" role="group" aria-label="Job source">
@@ -47,7 +48,7 @@
     {/if}
   </div>
   <button class="icon" aria-label="Connection, laser and machine settings" onclick={() => (app.screen = 'settings')}>
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
       <circle cx="12" cy="12" r="3" />
       <path
         d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"
@@ -57,29 +58,32 @@
 </header>
 
 <style>
+  /* Aria Studio's menu bar: 44 px on the bed, the Aria logo at 28 px. */
   header {
-    min-height: 56px;
+    min-height: 44px;
     flex: 0 0 auto;
     display: flex;
     align-items: center;
-    gap: 16px;
-    padding: 8px 20px;
+    gap: 12px;
+    padding: 6px 12px;
+    background: var(--bed);
     border-bottom: 1px solid var(--line-subtle);
     flex-wrap: wrap;
   }
   .brand {
     display: flex;
     align-items: center;
-    gap: 10px;
-    font-size: var(--text-md);
+    gap: 8px;
+    font-size: var(--text-sm);
+    line-height: var(--leading-sm);
     font-weight: 600;
-    letter-spacing: 0.2px;
+    color: var(--fg-strong);
   }
   .logo {
-    width: 22px;
-    height: 22px;
-    border-radius: 5px;
-    background: linear-gradient(135deg, var(--accent), var(--accent-deep));
+    display: block;
+    width: 28px;
+    height: 28px;
+    flex: 0 0 auto;
   }
   .status {
     flex: 1 1 auto;
@@ -101,9 +105,10 @@
     gap: 6px;
     max-width: 100%;
     font-size: var(--text-xs);
+    line-height: var(--leading-xs);
     border: 1px solid;
     border-radius: 999px;
-    padding: 4px 10px;
+    padding: 2px 10px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -135,16 +140,18 @@
     border-color: var(--line);
   }
   .icon {
-    width: 36px;
-    height: 36px;
+    width: 28px;
+    height: 28px;
     display: grid;
     place-items: center;
     border: 1px solid var(--line);
     border-radius: var(--radius);
-    background: var(--panel);
+    background: transparent;
     color: var(--fg);
   }
   .icon:hover {
+    border-color: var(--line-strong);
+    background: var(--raised);
     color: var(--fg-strong);
   }
 </style>

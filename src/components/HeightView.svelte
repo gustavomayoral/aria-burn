@@ -222,7 +222,7 @@
     top: 14px;
     transform: translateX(-50%);
     padding: 6px 10px;
-    border-radius: 6px;
+    border-radius: var(--radius);
     border: 1px solid var(--line);
     background: var(--overlay);
     font-size: var(--text-xs);
@@ -244,19 +244,26 @@
     border-radius: var(--radius);
   }
   .controls button {
-    width: 32px;
-    height: 32px;
-    border-radius: 6px;
+    width: 28px;
+    height: 28px;
+    border-radius: var(--radius-sm);
     border: 1px solid var(--line);
     background: var(--panel);
+    color: var(--fg);
     display: grid;
     place-items: center;
-    font-size: var(--text-lg);
+    font-size: var(--text-sm);
     line-height: 1;
+  }
+  .controls button:hover {
+    border-color: var(--line-strong);
+    background: var(--raised);
+    color: var(--fg-strong);
   }
   .controls button.text {
     width: auto;
     padding: 0 10px;
+    font-family: var(--font-condensed);
     font-size: var(--text-xs);
   }
 </style>

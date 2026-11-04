@@ -212,7 +212,8 @@
     flex: 0 0 260px;
     min-width: 220px;
     border-left: 1px solid var(--line-subtle);
-    padding: 18px;
+    background: var(--panel);
+    padding: 16px;
     display: flex;
     flex-direction: column;
     gap: 16px;
@@ -221,7 +222,7 @@
   p {
     margin: 8px 0 0;
     font-size: var(--text-2xs);
-    line-height: 1.45;
+    line-height: var(--leading-2xs);
     color: var(--fg-faint);
   }
   .banner {
@@ -232,7 +233,7 @@
     flex-direction: column;
     gap: 6px;
     font-size: var(--text-2xs);
-    line-height: 1.45;
+    line-height: var(--leading-2xs);
   }
   .banner strong {
     font-size: var(--text-xs);
@@ -271,16 +272,17 @@
     border: 0;
     background: none;
     color: var(--fg-muted);
-    font-size: var(--text-lg);
+    font-size: var(--text-sm);
     line-height: 1;
-    min-width: 28px;
-    min-height: 28px;
+    min-width: 24px;
+    min-height: 24px;
+    border-radius: var(--radius);
   }
   .go {
     align-self: flex-start;
-    min-height: 30px;
+    min-height: 24px;
     padding: 0 10px;
-    border-radius: 6px;
+    border-radius: var(--radius);
     border: 1px solid var(--fire-border);
     background: transparent;
     font-size: var(--text-xs);
@@ -296,7 +298,7 @@
     display: inline-block;
     width: 12px;
     height: 12px;
-    border-radius: 3px;
+    border-radius: var(--radius-sm);
     flex: 0 0 auto;
     border: 1px solid var(--swatch-border);
   }
@@ -322,7 +324,7 @@
   .ramp {
     width: 14px;
     height: 96px;
-    border-radius: 3px;
+    border-radius: var(--radius-sm);
     background: linear-gradient(to bottom, var(--depth-top), var(--depth-bottom));
   }
   .ticks {
@@ -337,7 +339,10 @@
     cursor: pointer;
   }
   .perf summary {
+    font-family: var(--font-condensed);
     font-size: var(--text-2xs);
+    letter-spacing: var(--tracking-wide);
+    text-transform: uppercase;
     color: var(--fg-faint);
     margin-bottom: 6px;
   }

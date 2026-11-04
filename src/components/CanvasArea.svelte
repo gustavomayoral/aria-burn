@@ -383,8 +383,9 @@
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    padding: 12px 20px;
+    padding: 8px 16px;
     border-bottom: 1px solid var(--line-subtle);
+    background: var(--panel);
     flex-wrap: wrap;
   }
   .tools {
@@ -393,24 +394,27 @@
     gap: 16px;
     flex-wrap: wrap;
     color: var(--fg);
-    font-size: var(--text-xs);
+    font-family: var(--font-condensed);
+    font-size: var(--text-ui);
   }
   .tools label {
     display: flex;
     align-items: center;
-    gap: 8px;
-    min-height: 32px;
+    gap: 6px;
+    min-height: 28px;
     user-select: none;
   }
   .tools label.off {
     color: var(--fg-faint);
   }
   .btn.small {
-    min-height: 32px;
+    min-height: 28px;
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: var(--text-xs);
+    padding: 0 10px;
+    font-family: var(--font-condensed);
+    font-size: var(--text-ui);
     color: var(--fg);
   }
   .menu {
@@ -420,7 +424,7 @@
     position: absolute;
     right: 0;
     top: calc(100% + 4px);
-    z-index: var(--z-popup);
+    z-index: var(--z-picker);
     display: flex;
     flex-direction: column;
     min-width: 180px;
@@ -434,11 +438,14 @@
     text-align: left;
     border: 0;
     background: transparent;
-    padding: 8px 10px;
-    border-radius: 5px;
+    padding: 6px 12px;
+    border-radius: var(--radius-sm);
+    font-size: var(--text-sm);
+    line-height: var(--leading-sm);
+    color: var(--fg);
   }
   .popup button:hover {
-    background: var(--line);
+    background: var(--raised);
   }
   .stage-wrap {
     flex: 1 1 auto;
@@ -452,15 +459,16 @@
     flex: 1 1 auto;
     min-height: 0;
     overflow: hidden;
-    border-radius: 10px;
+    border-radius: var(--radius);
     border: 1px solid var(--line);
-    background: var(--field);
+    background: var(--paper);
     box-shadow: var(--shadow-paper);
     cursor: crosshair;
     outline: none;
   }
   .stage:focus-visible {
     outline: var(--focus-ring);
+    outline-offset: var(--focus-ring-offset);
   }
   .stage.grab {
     cursor: grab;
@@ -523,7 +531,7 @@
     height: 4px;
     min-width: 20px;
     background: var(--fg-strong);
-    border-radius: 1px;
+    border-radius: var(--radius-sm);
     box-shadow: var(--shadow-hairline);
   }
   .scale span {
@@ -544,22 +552,24 @@
     border-radius: var(--radius);
   }
   .zoom button {
-    width: 32px;
-    height: 32px;
+    width: 28px;
+    height: 28px;
     border: 0;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     background: transparent;
-    font-size: var(--text-lg);
+    font-size: var(--text-sm);
     line-height: 1;
+    color: var(--fg);
   }
   .zoom button.text {
     width: auto;
     padding: 0 8px;
+    font-family: var(--font-condensed);
     font-size: var(--text-xs);
-    color: var(--fg);
   }
   .zoom button:hover:not(:disabled) {
-    background: var(--line);
+    background: var(--raised);
+    color: var(--fg-strong);
   }
   .zoom span {
     min-width: 40px;
@@ -585,17 +595,21 @@
     gap: 3px;
   }
   .tiles button {
-    height: 30px;
-    border-radius: 4px;
+    height: 28px;
+    border-radius: var(--radius-sm);
     border: 1px solid var(--line);
     background: var(--panel);
     color: var(--fg);
+    font-family: var(--font-mono);
     font-size: var(--text-2xs);
   }
+  .tiles button:hover:not([aria-pressed='true']) {
+    border-color: var(--line-strong);
+  }
   .tiles button[aria-pressed='true'] {
-    border-color: var(--accent);
-    background: var(--accent-soft);
-    color: var(--fg-strong);
+    border-color: var(--accent-border);
+    background: var(--accent);
+    color: var(--on-accent);
   }
   .minimap span {
     font-size: var(--text-2xs);
@@ -629,7 +643,7 @@
     transform: translateX(-50%);
     max-width: 80%;
     padding: 6px 12px;
-    border-radius: 6px;
+    border-radius: var(--radius);
     background: var(--overlay);
     border: 1px solid var(--line);
     font-size: var(--text-xs);
@@ -652,15 +666,19 @@
     text-align: center;
     gap: 10px;
     padding: 28px 24px;
-    border-radius: 12px;
+    border-radius: var(--radius);
   }
   .card strong {
-    font-size: var(--text-md);
+    font-family: var(--font-condensed);
+    font-size: var(--text-sm);
+    line-height: var(--leading-sm);
+    font-weight: 600;
+    color: var(--fg-strong);
   }
   .card p {
     margin: 0;
     font-size: var(--text-xs);
-    line-height: 1.5;
+    line-height: var(--leading-xs);
     color: var(--fg-muted);
   }
   .card .sub {
@@ -671,7 +689,7 @@
     border: 1px dashed var(--line-strong);
   }
   .card.dashed.over {
-    border-color: var(--accent);
+    border-color: var(--accent-ring);
     background: var(--accent-soft);
   }
   .card.error {
@@ -694,7 +712,7 @@
     flex-direction: column;
     gap: 8px;
     font-size: var(--text-xs);
-    line-height: 1.5;
+    line-height: var(--leading-xs);
     color: var(--fg);
   }
   .card li .line {
@@ -710,18 +728,20 @@
     flex-wrap: wrap;
   }
   .btn.big {
-    min-height: 40px;
+    min-height: 32px;
     padding: 0 16px;
   }
   .link {
     border: 0;
     background: none;
-    color: var(--accent);
+    color: var(--accent-text);
     font-size: var(--text-xs);
     padding: 4px;
+    border-radius: var(--radius-sm);
   }
   .link:hover {
-    color: var(--accent-hover);
+    text-decoration: underline;
+    text-underline-offset: 2px;
   }
   code {
     font-family: var(--font-mono);
@@ -743,7 +763,7 @@
     height: 22px;
     border-radius: 50%;
     border: 2px solid var(--line);
-    border-top-color: var(--accent);
+    border-top-color: var(--accent-ring);
     animation: spin 0.9s linear infinite;
   }
   @keyframes spin {
@@ -756,10 +776,12 @@
     inset: 8px;
     display: grid;
     place-items: center;
-    border: 2px dashed var(--accent);
-    border-radius: 10px;
+    border: 2px dashed var(--accent-ring);
+    border-radius: var(--radius);
     background: var(--scrim);
+    font-family: var(--font-condensed);
     font-size: var(--text-sm);
+    color: var(--fg-strong);
     pointer-events: none;
   }
 </style>

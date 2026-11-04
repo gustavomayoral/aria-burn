@@ -24,6 +24,7 @@
     "wrap": "node scripts/worktree.mjs wrap"
   },
   "dependencies": {
+    "@aria/theme": "link:../AriaStudio/aria-studio/packages/aria-theme",
     "aria-burn-core": "link:../aria-burn-core",
     "@tauri-apps/api": "^2.12",
     "@tauri-apps/plugin-store": "^2.5",

@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <script lang="ts">
+  import ariaLogo from '@aria/theme/aria-logo.svg'
   import { app } from '../lib/app.svelte.ts'
   import { describeConnection } from '../lib/emulator.ts'
   import { TILE_MAX_CELLS, gridPitchMm } from 'aria-burn-core/contract'
@@ -56,7 +57,7 @@
 <div class="screen">
   <header>
     <div class="brand">
-      <div class="logo" aria-hidden="true"></div>
+      <img class="logo" src={ariaLogo} alt="" width="28" height="28" draggable="false" />
       <span>Aria Burn</span>
       <span class="crumb">/ Connection, laser &amp; machine</span>
     </div>
@@ -197,29 +198,32 @@
     flex-direction: column;
   }
   header {
-    min-height: 56px;
+    min-height: 44px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 8px 20px;
+    padding: 6px 12px;
+    background: var(--bed);
     border-bottom: 1px solid var(--line-subtle);
   }
   .brand {
     display: flex;
     align-items: center;
-    gap: 10px;
-    font-size: var(--text-md);
+    gap: 8px;
+    font-size: var(--text-sm);
+    line-height: var(--leading-sm);
     font-weight: 600;
+    color: var(--fg-strong);
   }
   .crumb {
     color: var(--fg-muted);
     font-weight: 400;
   }
   .logo {
-    width: 22px;
-    height: 22px;
-    border-radius: 5px;
-    background: linear-gradient(135deg, var(--accent), var(--accent-deep));
+    display: block;
+    width: 28px;
+    height: 28px;
+    flex: 0 0 auto;
   }
   .scroll {
     flex: 1 1 auto;
@@ -236,15 +240,21 @@
   section {
     background: var(--panel);
     border: 1px solid var(--line);
-    border-radius: 12px;
-    padding: 18px 20px;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-paper);
+    padding: 16px 20px;
     display: flex;
     flex-direction: column;
     gap: 12px;
   }
   h2 {
     margin: 0;
-    font-size: var(--text-md);
+    font-size: var(--text-sm);
+    line-height: var(--leading-sm);
+    font-weight: 600;
+    letter-spacing: var(--tracking-wide);
+    text-transform: uppercase;
+    color: var(--fg-strong);
   }
   .note {
     margin: 0;
@@ -256,18 +266,21 @@
   }
   .pill {
     font-size: var(--text-2xs);
-    padding: 3px 8px;
+    line-height: var(--leading-2xs);
+    padding: 2px 8px;
     border-radius: 999px;
     border: 1px solid var(--line);
     color: var(--fg-muted);
   }
   .pill.on {
-    color: var(--ok);
-    border-color: var(--ok);
+    color: var(--ok-text);
+    background: var(--ok-soft);
+    border-color: var(--ok-border);
   }
   .pill.bad {
     color: var(--danger-text);
-    border-color: var(--danger-text);
+    background: var(--danger-soft);
+    border-color: var(--danger-border);
   }
   .grid {
     display: grid;
@@ -278,22 +291,40 @@
   .field {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 4px;
+    font-family: var(--font-condensed);
     font-size: var(--text-xs);
-    color: var(--fg);
+    line-height: var(--leading-xs);
+    color: var(--fg-muted);
   }
   .check {
+    gap: 6px;
+    font-size: var(--text-ui);
+    color: var(--fg);
     flex-direction: row;
     align-items: center;
   }
   input[type='number'],
   select,
   textarea {
-    background: var(--bed);
+    background: var(--field);
     border: 1px solid var(--line);
-    border-radius: 6px;
-    padding: 7px 9px;
+    border-radius: var(--radius);
+    padding: 4px 8px;
     min-width: 0;
+    font-size: var(--text-ui);
+    line-height: var(--leading-ui);
+  }
+  input[type='number'] {
+    font-family: var(--font-mono);
+  }
+  input[type='number']:focus,
+  select:focus,
+  textarea:focus {
+    border-color: var(--accent-border);
+  }
+  textarea {
+    font-family: var(--font-mono);
   }
   .pair {
     display: flex;
@@ -310,8 +341,10 @@
     width: 0;
   }
   .hint {
+    font-family: var(--font-sans);
     color: var(--fg-faint);
     font-size: var(--text-2xs);
+    line-height: var(--leading-2xs);
   }
   code {
     font-family: var(--font-mono);
@@ -330,6 +363,6 @@
     gap: 12px;
   }
   .saved {
-    color: var(--ok);
+    color: var(--ok-text);
   }
 </style>
