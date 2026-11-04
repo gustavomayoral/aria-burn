@@ -30,7 +30,7 @@ fn parse_local(value: &str) -> Option<Url> {
 /// Points the main window at the bench page.
 pub fn open(app: &tauri::App, url: Url) -> tauri::Result<()> {
     let window = app.get_webview_window("main").expect("main window is configured in tauri.conf.json");
-    window.set_title(&format!("Laser Sim — bench {url}"))?;
+    window.set_title(&format!("Aria Burn — bench {url}"))?;
     window.navigate(url)
 }
 

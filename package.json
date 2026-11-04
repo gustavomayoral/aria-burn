@@ -1,7 +1,7 @@
 {
   "name": "aria-burn",
   "version": "0.1.0",
-  "description": "Laser Sim desktop app: Tauri shell and Svelte web UI",
+  "description": "Aria Burn desktop app: Tauri shell and Svelte web UI",
   "license": "GPL-3.0-or-later",
   "private": true,
   "type": "module",

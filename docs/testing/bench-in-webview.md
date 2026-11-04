@@ -1,6 +1,6 @@
 # Running the core bench in the app's webview
 
-aria-burn-core's WebGL2 bench (`pnpm bench`) normally runs in a browser. Performance in Laser Sim depends on the app's own webview: WKWebView on macOS, WebView2 on Windows. Use this to run the bench there (BURN-33).
+aria-burn-core's WebGL2 bench (`pnpm bench`) normally runs in a browser. Performance in Aria Burn depends on the app's own webview: WKWebView on macOS, WebView2 on Windows. Use this to run the bench there (BURN-33).
 
 1. In aria-burn-core, serve the bench:
 

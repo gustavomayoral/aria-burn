@@ -346,7 +346,7 @@ fn raster(rows: usize, cols: usize, feed: u32) -> Vec<String> {
 fn handshake_and_settings() {
     let (server, sink) = start(Pacing::Realtime);
     let mut c = Client::connect(server.address());
-    assert_eq!(c.command("$I"), ["[VER:1.1h.20190825:Laser Sim]", "[OPT:V,15,128]", "ok"]);
+    assert_eq!(c.command("$I"), ["[VER:1.1h.20190825:Aria Burn]", "[OPT:V,15,128]", "ok"]);
     let settings = c.command("$$");
     assert_eq!(settings.len(), 35);
     assert!(settings.contains(&"$30=1000".to_owned()) && settings.contains(&"$32=1".to_owned()));

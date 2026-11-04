@@ -33,7 +33,7 @@
 <header>
   <div class="brand">
     <div class="logo" aria-hidden="true"></div>
-    <span>LaserSim</span>
+    <span>Aria Burn</span>
   </div>
   <div class="seg" role="group" aria-label="Job source">
     <button aria-pressed={app.source === 'file'} onclick={() => (app.source = 'file')}>File</button>

@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Laser Sim desktop shell. Owns the machine side (G-code parser, GRBL
+//! Aria Burn desktop shell. Owns the machine side (G-code parser, GRBL
 //! emulator and planner) and streams to the webview over Tauri Channels.
 
 mod bench;
 mod emulator;
 mod job;
+mod migrate;
 mod smoke;
 mod stream;
 
@@ -35,6 +36,9 @@ pub fn run() {
         mode.start_watchdog();
     }
     let bench_url = bench::url_from_env();
+    let context = tauri::generate_context!();
+    // Before the window exists: WebView2 opens its profile under the identifier's folder.
+    migrate::run(&context.config().identifier);
     tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::default().build())
         .setup(move |app| {
@@ -56,6 +60,6 @@ pub fn run() {
             job::launch_file,
             job::export_save
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Laser Sim");
+        .run(context)
+        .expect("error while running Aria Burn");
 }

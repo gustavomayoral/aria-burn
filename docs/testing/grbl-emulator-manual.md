@@ -25,7 +25,7 @@ Watch three places while testing:
    - LightBurn reports *Ready*;
    - the top bar says `Sender connected from 127.0.0.1:…`.
 3. In the console, type `$I`, `$$`, `$G` and `?`. Expected:
-   - `$I` returns `[VER:1.1h.20190825:Laser Sim]` and `[OPT:V,15,128]`;
+   - `$I` returns `[VER:1.1h.20190825:Aria Burn]` and `[OPT:V,15,128]`;
    - `$$` lists the settings, with `$11`, `$30`, `$32` and `$110`–`$131` taken from the machine profile;
    - `?` returns `<Idle|MPos:…>`.
 

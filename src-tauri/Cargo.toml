@@ -1,7 +1,7 @@
 [package]
 name = "aria-burn"
 version = "0.1.0"
-description = "Laser Sim: laser-engraver burn simulator"
+description = "Aria Burn: laser-engraver burn simulator"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
@@ -23,3 +23,5 @@ serde.workspace = true
 serde_json.workspace = true
 tauri = { version = "2.12", features = [] }
 tauri-plugin-store = "2.5"
+# Same major as Tauri uses, for the per-user folders it names after the identifier.
+dirs = "7"

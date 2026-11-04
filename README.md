@@ -1,6 +1,6 @@
 # aria-burn
 
-Laser Sim desktop app: a Tauri 2 app with a Rust shell (GRBL planner port, TCP emulator) and a Svelte 5 web UI.
+Aria Burn desktop app: a Tauri 2 app with a Rust shell (GRBL planner port, TCP emulator) and a Svelte 5 web UI.
 
 The simulation core lives in the sibling repo [aria-burn-core](../aria-burn-core) (MIT). The app consumes it via `"aria-burn-core": "link:../aria-burn-core"`, so check both repos out side by side.
 

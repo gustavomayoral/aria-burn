@@ -54,6 +54,7 @@ dependencies = [
  "aria-burn-contract",
  "aria-burn-gcode",
  "aria-burn-grbl",
+ "dirs",
  "serde",
  "serde_json",
  "tauri",

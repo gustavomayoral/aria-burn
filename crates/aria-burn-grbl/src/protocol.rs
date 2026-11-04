@@ -9,7 +9,7 @@ pub const PLANNER_BLOCKS: usize = 15;
 pub const LINE_BUFFER_SIZE: usize = 80;
 
 pub const BANNER: &str = "\r\nGrbl 1.1h ['$' for help]\r\n";
-pub const VERSION: &str = "[VER:1.1h.20190825:Laser Sim]\r\n";
+pub const VERSION: &str = "[VER:1.1h.20190825:Aria Burn]\r\n";
 pub const UNLOCK_HINT: &str = "[MSG:'$H'|'$X' to unlock]\r\n";
 pub const HELP: &str = "[HLP:$$ $# $G $I $N $x=val $Nx=line $J=line $SLP $C $X $H ~ ! ? ctrl-x]\r\n";
 

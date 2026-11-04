@@ -57,7 +57,7 @@
   <header>
     <div class="brand">
       <div class="logo" aria-hidden="true"></div>
-      <span>LaserSim</span>
+      <span>Aria Burn</span>
       <span class="crumb">/ Connection, laser &amp; machine</span>
     </div>
     <button class="btn" onclick={() => (app.screen = 'main')}>← Back to simulator</button>
