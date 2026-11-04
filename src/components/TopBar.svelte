@@ -47,6 +47,7 @@
       <span class="file">{fileStatus}</span>
     {/if}
   </div>
+  <button class="machine" title="Active machine: change it in settings" onclick={() => (app.screen = 'settings')}>{app.settings.machine.name}</button>
   <button class="icon" aria-label="Connection, laser and machine settings" onclick={() => (app.screen = 'settings')}>
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
       <circle cx="12" cy="12" r="3" />
@@ -90,6 +91,23 @@
     min-width: 0;
     display: flex;
     justify-content: flex-end;
+  }
+  .machine {
+    max-width: 280px;
+    padding: 2px 8px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    font-family: var(--font-condensed);
+    font-size: var(--text-xs);
+    line-height: var(--leading-xs);
+    color: var(--fg-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .machine:hover {
+    color: var(--fg-strong);
+    border-color: var(--line-strong);
   }
   .file {
     font-size: var(--text-xs);

@@ -9,7 +9,9 @@ The simulation core lives in the sibling repo [aria-burn-core](../aria-burn-core
 - `src/` — webview front end (Svelte 5 + TypeScript, three.js for the Height view)
   - `lib/ipc.ts` — typed wrappers over the Rust commands and Channels
   - `lib/stream-check.ts` — decodes sample batches with the core's decoder and checks them against `plan.done`
-  - `lib/settings.ts` — persisted machine profile and UI preferences (`tauri-plugin-store`)
+  - `lib/settings.ts` — persisted live machine profile, UI preferences and the machine library (`tauri-plugin-store`)
+  - `lib/machines.ts`, `lib/machine-session.ts` — machine picker and user machine library (BURN-31): built-ins (Default and every catalog frame × module from aria-burn-core) are read-only, so editing one, or a sender's `$x=` write to one, saves a copy; same flow as Aria Studio's Preferences → Machines
+  - `lib/machine-import.ts` — `$$` paste and LightBurn `.lbdev` import, each reporting what it applied, ignored and refused
 - `src-tauri/` — the Rust shell
   - `emulator.rs` — starts/stops the GRBL emulator from the network settings and forwards its traffic to the webview Channels
   - `stream.rs` — dummy sample stream for the IPC smoke test

@@ -1,0 +1,34 @@
+{
+	"DeviceList": [
+		{
+			"DisplayName": "Workshop Diode 400",
+			"Name": "GRBL",
+			"Type": "TCP",
+			"Address": "127.0.0.1",
+			"Width": 400,
+			"Height": 380,
+			"Origin": "FrontLeft",
+			"MirrorX": false,
+			"MirrorY": false,
+			"ProcessOffsetX": 0,
+			"ProcessOffsetY": 0,
+			"CameraLens": "none",
+			"Settings": {
+				"MaxSValue": 1000,
+				"Acceleration": 1500,
+				"$110": 7200,
+				"$100": 80,
+				"FrameSpeed": 3000,
+				"Units": "mm",
+				"ToolChange": { "Enabled": false }
+			}
+		},
+		{
+			"DisplayName": "Spare Gantry",
+			"Name": "GRBL",
+			"Type": "Serial",
+			"Width": 300,
+			"Height": 300
+		}
+	]
+}

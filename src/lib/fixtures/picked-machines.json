@@ -1,0 +1,109 @@
+{
+  "default": {
+    "contractVersion": 1,
+    "name": "Generic 10 W diode, Sculpfun S30 Pro class (provisional)",
+    "opticalPowerW": 10,
+    "sMax": 1000,
+    "laserMode": true,
+    "junctionDeviationMm": 0.01,
+    "maxRateMmPerMin": {
+      "x": 10000,
+      "y": 10000
+    },
+    "accelMmPerS2": {
+      "x": 1000,
+      "y": 1000
+    },
+    "travelMm": {
+      "x": 410,
+      "y": 400
+    },
+    "spot": {
+      "sigmaXMm": 0.03,
+      "sigmaYMm": 0.015,
+      "angleDeg": 90
+    },
+    "powerCurve": [
+      {
+        "s": 0,
+        "power": 0
+      },
+      {
+        "s": 0.05,
+        "power": 0
+      },
+      {
+        "s": 0.1,
+        "power": 0.04
+      },
+      {
+        "s": 0.2,
+        "power": 0.14
+      },
+      {
+        "s": 1,
+        "power": 1
+      }
+    ],
+    "provenance": {
+      "source": "provisional",
+      "label": "provisional — not measured on a real laser",
+      "notes": "PROVISIONAL - not validated against real burns (COD-266). Derived from published settings and datasheets; COD-254 replaces these. Sources and derivation: src/profiles/provisional/SOURCES.md"
+    }
+  },
+  "falcon2": {
+    "contractVersion": 1,
+    "name": "Creality Falcon2 + Falcon2 40 W",
+    "opticalPowerW": 40,
+    "sMax": 1000,
+    "laserMode": true,
+    "junctionDeviationMm": 0.01,
+    "maxRateMmPerMin": {
+      "x": 25000,
+      "y": 25000
+    },
+    "accelMmPerS2": {
+      "x": 1000,
+      "y": 1000
+    },
+    "travelMm": {
+      "x": 400,
+      "y": 415
+    },
+    "spot": {
+      "sigmaXMm": 0.03,
+      "sigmaYMm": 0.02,
+      "angleDeg": 90
+    },
+    "powerCurve": [
+      {
+        "s": 0,
+        "power": 0
+      },
+      {
+        "s": 0.05,
+        "power": 0
+      },
+      {
+        "s": 0.1,
+        "power": 0.04
+      },
+      {
+        "s": 0.2,
+        "power": 0.14
+      },
+      {
+        "s": 1,
+        "power": 1
+      }
+    ],
+    "wavelengthNm": 455,
+    "frameId": "creality-falcon2",
+    "moduleId": "creality-falcon2-40w",
+    "provenance": {
+      "source": "provisional",
+      "label": "provisional — vendor figures, not measured on a real laser",
+      "notes": "PROVISIONAL fields: frame.maxRateMmPerMin, frame.accelMmPerS2, module.opticalPowerW, module.spot, module.powerCurve. Frame: Frame values marked sourced come from manufacturer specs or published $$ dumps; the rest are assumed common GRBL defaults. Sources: src/profiles/catalog/SOURCES.md#creality-falcon2 Module: PROVISIONAL - not validated against real burns. Optical power and spot are vendor marketing figures; the power curve is the generic NUBM-class diode curve (src/profiles/provisional/SOURCES.md §1). BURN-12 replaces these. Sources: src/profiles/catalog/SOURCES.md#creality-falcon2-40w"
+    }
+  }
+}

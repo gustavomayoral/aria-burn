@@ -7,7 +7,9 @@ import type { ChannelEvent, MachineProfile } from 'aria-burn-core/contract'
 import { burn } from './burn.svelte.ts'
 import { configureEmulator, emulatorSettings, subscribeEmulator, type ConnectionStatus } from './emulator.ts'
 import { isTauri } from './ipc.ts'
-import { defaultSettings, loadSettings, machineProblems, saveSettings, type Settings } from './settings.ts'
+import { loadMachines, senderWrote, type MachineHost } from './machine-session.ts'
+import { emptyLibrary, type MachineLibrary } from './machines.ts'
+import { defaultSettings, saveSettings, type Settings } from './settings.ts'
 
 export type Screen = 'main' | 'settings'
 export type JobSource = 'file' | 'live'
@@ -15,8 +17,10 @@ export type JobSource = 'file' | 'live'
 type EventOf<T extends ChannelEvent['event']['type']> = Extract<ChannelEvent['event'], { type: T }>
 export type MachineStatus = EventOf<'machine.status'>
 
-class AppState {
+class AppState implements MachineHost {
   settings = $state<Settings>(defaultSettings())
+  /** The user's machines and the active one (BURN-31); actions in machine-session.ts. */
+  library = $state<MachineLibrary>(emptyLibrary())
   screen = $state<Screen>('main')
   loaded = $state(false)
   warnings = $state<string[]>([])
@@ -28,14 +32,9 @@ class AppState {
   private nextEventSeq = 0
 
   async load() {
-    const { settings, warnings } = await loadSettings()
-    this.settings = settings
-    this.warnings = warnings
+    await loadMachines(this)
     this.loaded = true
   }
-
-  /** Persists the current settings; throws if the machine profile is invalid. */
-  save = () => saveSettings(this.settings)
 
   /** UI preferences save as they change, no Save button needed. */
   async savePrefs() {
@@ -68,15 +67,12 @@ class AppState {
     }
   }
 
-  /** A sender wrote `$` settings the profile holds (`$11`, `$110`…): keep and save them. */
+  /**
+   * A sender wrote `$` settings the profile holds (`$11`, `$110`…): the user's
+   * machine keeps them; a built-in is copied first, never changed.
+   */
   private onEmulatorProfile(profile: MachineProfile) {
-    const problems = machineProblems(profile)
-    if (problems.length) {
-      this.warnings = [...this.warnings, `Ignored $ settings from the sender: ${problems[0]}`]
-      return
-    }
-    this.settings.machine = profile
-    void this.savePrefs()
+    void senderWrote(this, profile)
   }
 
   private onLiveEvent(msg: ChannelEvent) {

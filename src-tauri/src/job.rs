@@ -292,6 +292,51 @@ mod tests {
         assert_eq!(sent, 1);
     }
 
+    /// The Rust half of BURN-31's end-to-end test (`src/lib/machine-pick.test.ts`
+    /// writes the profiles): the machine picked in the settings screen sets the
+    /// planner's timing. Same G-code, two picked machines, different duration
+    /// and energy, and every `$` setting the emulator reports follows the pick.
+    #[test]
+    fn picked_machines_change_planner_timing() {
+        let json = std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/lib/fixtures/picked-machines.json"),
+        )
+        .unwrap();
+        let picked: std::collections::BTreeMap<String, MachineProfile> = serde_json::from_str(&json).unwrap();
+        let (default, falcon) = (&picked["default"], &picked["falcon2"]);
+        // Long rapids and a cut faster than the default's $110 limit, then a square at engraving feed.
+        let gcode = b"G21 G90\nM4 S0\nG0 X300 Y200\nG1 X100 Y200 F20000 S600\nG0 X0 Y0\nG1 X10 F1200 S600\nG1 Y10\nG1 X0\nG1 Y0\nM5\n";
+        let run = |p: &MachineProfile| {
+            let settings = GrblSettings::new(p.clone());
+            let job = parse_file("picked.gcode", gcode, &settings);
+            assert!(!has_errors(&job), "{:?}", job.diagnostics);
+            let totals = plan_batches(1, &job, &settings, |_| true).unwrap();
+            (settings, totals)
+        };
+        let (s_default, t_default) = run(default);
+        let (s_falcon, t_falcon) = run(falcon);
+        assert!(
+            t_falcon.duration_s < t_default.duration_s * 0.8,
+            "{} s vs {} s",
+            t_falcon.duration_s,
+            t_default.duration_s
+        );
+        // 40 W against 10 W, for less time.
+        assert!(t_falcon.energy_j > 2.0 * t_default.energy_j, "{} J vs {} J", t_falcon.energy_j, t_default.energy_j);
+        for n in [110, 111, 120, 121, 130, 131] {
+            let expected = match n {
+                110 => falcon.max_rate_mm_per_min.x,
+                111 => falcon.max_rate_mm_per_min.y,
+                120 => falcon.accel_mm_per_s2.x,
+                121 => falcon.accel_mm_per_s2.y,
+                130 => falcon.travel_mm.x,
+                _ => falcon.travel_mm.y,
+            };
+            assert_eq!(s_falcon.get(n), Some(expected), "${n}");
+        }
+        assert_ne!(s_falcon.get(110), s_default.get(110));
+    }
+
     #[test]
     fn request_json() {
         let json = format!(

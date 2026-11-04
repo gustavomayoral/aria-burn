@@ -4,16 +4,20 @@
   import { app } from '../lib/app.svelte.ts'
   import { describeConnection } from '../lib/emulator.ts'
   import { TILE_MAX_CELLS, gridPitchMm } from 'aria-burn-core/contract'
-  import { applySettingsDump, machineProblems } from '../lib/settings.ts'
+  import type { ProfileField } from 'aria-burn-core/contract'
+  import { liveStatus, saveSettingsScreen } from '../lib/machine-session.ts'
+  import { machineProblems } from '../lib/settings.ts'
+  import MachinesSection from './MachinesSection.svelte'
 
   const m = $derived(app.settings.machine)
   const net = $derived(app.settings.network)
 
   let saved = $state(false)
   let saveError = $state<string | null>(null)
-  let showPaste = $state(false)
-  let dump = $state('')
-  let dumpResult = $state('')
+  let savedAs = $state<string | null>(null)
+  // Provisional values (catalog vendor figures, or assumed defaults) are marked on their fields.
+  const status = $derived(liveStatus(app))
+  const provisional = (f: ProfileField) => status[f] === 'provisional'
 
   const problems = $derived(machineProblems(m))
   const host = $derived(net.bindMode === 'localhost' ? '127.0.0.1' : '<this machine’s LAN IP>')
@@ -26,22 +30,16 @@
   const diameter = (sigma: number) => +(sigma * 4).toFixed(4)
   const sigma = (e: Event & { currentTarget: HTMLInputElement }) => num(e) / 4
 
-  function applyDump() {
-    const { applied, rejected } = applySettingsDump(m, dump)
-    const parts = [applied.length ? `Applied ${applied.join(', ')}.` : 'No profile settings found.']
-    if (rejected.length) parts.push(`Skipped ${rejected.join('; ')}.`)
-    dumpResult = parts.join(' ')
-    showPaste = applied.length === 0
-  }
-
   async function save() {
     saveError = null
     try {
-      await app.save()
+      // A built-in is never changed: edits to one are saved as a copy of your own.
+      const copy = await saveSettingsScreen(app)
+      savedAs = copy?.name ?? null
       // Restarts the emulator if the address changed; pacing and profile apply in place.
       await app.applyEmulator()
       saved = true
-      setTimeout(() => (saved = false), 1500)
+      setTimeout(() => (saved = false), savedAs ? 4000 : 1500)
     } catch (e) {
       saveError = String(e)
     }
@@ -53,6 +51,10 @@
     { label: 'Travel (mm)', codes: '$130 / $131', key: 'travelMm' },
   ] as const
 </script>
+
+{#snippet prov(field: ProfileField)}
+  {#if provisional(field)}<span class="tag prov" title="Provisional: a vendor figure or an assumed default, not measured">provisional</span>{/if}
+{/snippet}
 
 <div class="screen">
   <header>
@@ -102,18 +104,20 @@
         {/if}
       </section>
 
+      <MachinesSection />
+
       <section>
         <h2>Laser</h2>
         <p class="note">Turns S values into absolute energy. Without optical watts the simulator can’t compute fluence.</p>
         <div class="grid">
-          <label>Optical power (W)
+          <label>Optical power (W) {@render prov('opticalPowerW')}
             <input type="number" min="0.5" step="0.5" value={m.opticalPowerW} onchange={(e) => (m.opticalPowerW = num(e))} />
             <span class="hint">Output power, not the module’s electrical rating.</span>
           </label>
-          <label>Max S value <code>$30</code>
+          <label>Max S value <code>$30</code> {@render prov('sMax')}
             <input type="number" min="1" value={m.sMax} onchange={(e) => (m.sMax = num(e))} />
           </label>
-          <label>Spot width × height (mm)
+          <label>Spot width × height (mm) {@render prov('spot')}
             <span class="pair">
               <input type="number" min="0.004" step="0.001" value={diameter(m.spot.sigmaXMm)} onchange={(e) => (m.spot.sigmaXMm = sigma(e))} aria-label="Spot width, long axis, 1/e² diameter (mm)" />
               <span aria-hidden="true">×</span>
@@ -121,7 +125,7 @@
             </span>
             <span class="hint">1/e² diameters; width is the long axis. Gaussian σ {m.spot.sigmaXMm.toFixed(4)} × {m.spot.sigmaYMm.toFixed(4)} mm.</span>
           </label>
-          <label>Spot orientation (°)
+          <label>Spot orientation (°) {@render prov('spot')}
             <input type="number" min="-180" max="180" value={m.spot.angleDeg} onchange={(e) => (m.spot.angleDeg = num(e))} />
             <span class="hint">Angle of the long axis from machine +X, counter-clockwise.</span>
           </label>
@@ -141,14 +145,14 @@
         <div class="grid">
           {#each axes as a (a.key)}
             <div class="field">
-              <span>{a.label} <code>{a.codes}</code></span>
+              <span>{a.label} <code>{a.codes}</code> {@render prov(a.key)}</span>
               <span class="pair">
                 <label>X <input type="number" min="1" value={m[a.key].x} onchange={(e) => (m[a.key].x = num(e))} /></label>
                 <label>Y <input type="number" min="1" value={m[a.key].y} onchange={(e) => (m[a.key].y = num(e))} /></label>
               </span>
             </div>
           {/each}
-          <label>Junction deviation (mm) <code>$11</code>
+          <label>Junction deviation (mm) <code>$11</code> {@render prov('junctionDeviationMm')}
             <input type="number" min="0.001" step="0.001" value={m.junctionDeviationMm} onchange={(e) => (m.junctionDeviationMm = num(e))} />
           </label>
         </div>
@@ -157,22 +161,7 @@
 
       <section>
         <h2>GRBL settings</h2>
-        <p class="note">The profile is the emulated controller’s <code>$11</code>, <code>$30</code>, <code>$32</code> and <code>$110</code>–<code>$131</code>: LightBurn reads them with <code>$$</code>, and writes from its machine settings change them here. To match your machine, run <code>$$</code> on it and paste the output.</p>
-        {#if showPaste}
-          <label>$$ output
-            <textarea rows="6" bind:value={dump} placeholder={'$11=0.010\n$30=1000\n$32=1\n$110=6000\n…'}></textarea>
-          </label>
-          <div class="row">
-            <button class="btn primary" onclick={applyDump}>Apply</button>
-            <button class="btn" onclick={() => (showPaste = false)}>Cancel</button>
-            <span class="note">{dumpResult}</span>
-          </div>
-        {:else}
-          <div class="row">
-            <button class="btn" onclick={() => (showPaste = true)}>Paste $$ output…</button>
-            <span class="note">{dumpResult}</span>
-          </div>
-        {/if}
+        <p class="note">The machine is the emulated controller’s <code>$11</code>, <code>$30</code>, <code>$32</code> and <code>$110</code>–<code>$131</code>: LightBurn reads them with <code>$$</code>, and writes from its machine settings change your machine (a built-in one is copied first). To match your machine, import its <code>$$</code> output under Machine above.</p>
       </section>
 
       {#if problems.length}
@@ -184,7 +173,7 @@
       {#if saveError}<div class="callout danger">{saveError}</div>{/if}
 
       <div class="footer">
-        {#if saved}<span class="saved" role="status">Saved</span>{/if}
+        {#if saved}<span class="saved" role="status">{savedAs ? `Saved as “${savedAs}” (built-ins are read-only)` : 'Saved'}</span>{/if}
         <button class="btn primary" disabled={problems.length > 0} onclick={save}>Save</button>
       </div>
     </div>
@@ -305,8 +294,7 @@
     align-items: center;
   }
   input[type='number'],
-  select,
-  textarea {
+  select {
     background: var(--field);
     border: 1px solid var(--line);
     border-radius: var(--radius);
@@ -319,12 +307,8 @@
     font-family: var(--font-mono);
   }
   input[type='number']:focus,
-  select:focus,
-  textarea:focus {
+  select:focus {
     border-color: var(--accent-border);
-  }
-  textarea {
-    font-family: var(--font-mono);
   }
   .pair {
     display: flex;
@@ -351,11 +335,6 @@
     font-size: var(--text-2xs);
     color: var(--fg-muted);
   }
-  .row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
   .footer {
     display: flex;
     justify-content: flex-end;
@@ -364,5 +343,20 @@
   }
   .saved {
     color: var(--ok-text);
+  }
+  .tag.prov {
+    align-self: flex-start;
+    padding: 0 6px;
+    border-radius: 999px;
+    border: 1px solid var(--warn-border);
+    background: var(--warn-soft);
+    color: var(--warn-text);
+    font-size: var(--text-2xs);
+    line-height: var(--leading-2xs);
+    white-space: nowrap;
+  }
+  label .tag.prov {
+    display: inline-block;
+    margin-left: 4px;
   }
 </style>
