@@ -6,10 +6,14 @@
 //   full    job load, scrub release, live plan.done: every tile at full res
 //   detail  zoomed past the overview's resolution: a 1:1 window of the grid
 // Nothing runs per frame. Runs happen on change, and draws only redraw.
+// Full runs plan their tiles with GlSim.fit (the GPU byte budget, BURN-36),
+// and a lost WebGL context is rebuilt and re-run in place (BURN-39).
 
 import {
   CellReader,
+  GlAllocationError,
   GlBurnView,
+  GlContextLostError,
   GlSim,
   LiveJob,
   SampleStore,
@@ -20,10 +24,12 @@ import {
   peakTemperatureModel,
   setupJob,
   visibleCells,
+  watchContextLoss,
   type BurnLayer,
   type BurnViewport,
   type CellReadout,
   type ChannelEvent,
+  type ContextWatch,
   type Diagnostic,
   type FireSpot,
   type Heightmap,
@@ -94,6 +100,12 @@ const DETAIL_DELAY_MS = 120
 const RELEASE_DELAY_MS = 180
 /** Playback speed: whole job in this many seconds of wall time. */
 const PLAY_SECONDS = 12
+/** A lost context that isn't restored by then is reported as an error. */
+const RESTORE_TIMEOUT_MS = 8000
+
+const CONTEXT_GONE_MESSAGE = 'The graphics context was lost and didn’t come back. Restart the app to continue; your G-code file is unchanged.'
+const OUT_OF_GPU_MEMORY_MESSAGE =
+  'This job needs more graphics memory than this computer can give it, even split into the smallest tiles. Close other apps that use the GPU, or simulate a smaller part of the job.'
 
 let nextFileJobId = 1_000_000
 
@@ -127,10 +139,15 @@ class BurnEngine {
   /** Deepest cut in the Height view's heightmap (mm), for its depth scale. */
   depthMaxMm = $state(0)
   glError = $state<string | null>(null)
+  /** The WebGL context was lost; the burn view is being rebuilt (BURN-39). */
+  restoring = $state(false)
   times = $state<RunTimes>({ coarse: null, full: null, detail: null, draw: null })
   canvasSize = $state({ width: 0, height: 0 })
 
   private canvas: HTMLCanvasElement | null = null
+  private gl: WebGL2RenderingContext | null = null
+  private contextWatch: ContextWatch | null = null
+  private restoreTimer: ReturnType<typeof setTimeout> | null = null
   private sim: GlSim | null = null
   private burn: GlBurnView | null = null
   private store: SampleStore | null = null
@@ -164,29 +181,79 @@ class BurnEngine {
       this.glError = 'WebGL2 is not available, so the burn can’t be simulated on this computer.'
       return
     }
-    try {
-      this.sim = new GlSim(gl)
-      this.burn = new GlBurnView(this.sim)
-      this.glError = null
-    } catch (e) {
-      this.glError = String(e instanceof Error ? e.message : e)
-      return
-    }
-    if (this.material) this.burn.setMaterial(this.material)
-    canvas.addEventListener('webglcontextlost', (e) => {
-      e.preventDefault()
-      this.glError = 'The graphics context was lost. Reopen the job to continue.'
-    })
-    if (this.store && this.setup) this.queue('full')
-    else this.queue('draw')
+    this.gl = gl
+    // Watch before building: the GPU objects are rebuilt on restore, with the ledger cleared on loss.
+    this.contextWatch = watchContextLoss(canvas, { onLost: () => this.contextLost(), onRestored: () => this.contextRestored() }, gl)
+    if (this.buildGpu()) this.rerun()
   }
 
   detach(): void {
+    this.contextWatch?.stop()
+    this.contextWatch = null
+    if (this.restoreTimer) clearTimeout(this.restoreTimer)
+    this.restoreTimer = null
+    this.restoring = false
     this.burn?.dispose()
     this.sim?.releaseTargets()
     this.burn = null
     this.sim = null
+    this.gl = null
     this.canvas = null
+  }
+
+  /** New GlSim and burn view on the current context (at attach and after a restore). */
+  private buildGpu(): boolean {
+    if (!this.gl) return false
+    try {
+      this.sim = new GlSim(this.gl)
+      this.burn = new GlBurnView(this.sim)
+      this.glError = null
+    } catch (e) {
+      if (e instanceof GlContextLostError || this.gl.isContextLost()) return false
+      this.glError = String(e instanceof Error ? e.message : e)
+      return false
+    }
+    if (this.material) this.burn.setMaterial(this.material)
+    return true
+  }
+
+  /** Re-run whatever the canvas should show from scratch. */
+  private rerun(): void {
+    if (this.store && this.setup) this.queue(this.live?.streaming ? 'coarse' : 'full')
+    else this.queue('draw')
+  }
+
+  /**
+   * The context is gone (webglcontextlost, or a run that found it dead): every
+   * GPU object died with it. Stop running and wait for the restore; the job,
+   * its samples and the view stay on the CPU side.
+   */
+  private contextLost(): void {
+    if (this.frame) cancelAnimationFrame(this.frame)
+    this.frame = 0
+    if (this.releaseTimer) clearTimeout(this.releaseTimer)
+    if (this.detailTimer) clearTimeout(this.detailTimer)
+    this.releaseTimer = this.detailTimer = null
+    this.sim = null
+    this.burn = null
+    this.hover = null
+    if (this.restoring) return
+    this.restoring = true
+    this.restoreTimer = setTimeout(() => {
+      this.restoreTimer = null
+      if (this.restoring) this.glError = CONTEXT_GONE_MESSAGE
+    }, RESTORE_TIMEOUT_MS)
+  }
+
+  private contextRestored(): void {
+    if (this.restoreTimer) clearTimeout(this.restoreTimer)
+    this.restoreTimer = null
+    this.restoring = false
+    this.pending = { coarse: false, full: false, detail: false, draw: false }
+    if (this.buildGpu()) {
+      this.glError = null
+      this.rerun()
+    }
   }
 
   /** Canvas size changed (CSS px). */
@@ -653,8 +720,21 @@ class BurnEngine {
     this.setup = bounds ? setupJob(bounds, this.machine, this.material, { tiling: this.live && !model ? 'live' : 'regular' }) : null
     const setup = this.setup
     if (!setup) return false
+    const { grid } = setup
     if (this.reader) this.reader.setSetup(setup)
     else this.reader = new CellReader(store, setup)
+    this.setGrid(setup)
+    return !before || before.width !== grid.width || before.height !== grid.height || before.originXMm !== grid.originXMm
+  }
+
+  /** A plan that fits the GPU (GlSim.fit, or the one a full run fell back to) replaces the setup's. */
+  private adoptPlan(setup: SimSetup): void {
+    this.setup = setup
+    this.reader?.setSetup(setup)
+    this.setGrid(setup)
+  }
+
+  private setGrid(setup: SimSetup): void {
     const { grid, plan } = setup
     this.grid = {
       widthMm: grid.width * grid.pitchMm,
@@ -671,7 +751,6 @@ class BurnEngine {
         maxY: grid.originYMm + (t.core.y + t.core.height) * grid.pitchMm,
       })),
     }
-    return !before || before.width !== grid.width || before.height !== grid.height || before.originXMm !== grid.originXMm
   }
 
   private timed(work: () => void): number {
@@ -685,14 +764,23 @@ class BurnEngine {
     this.frame = 0
     const p = this.pending
     const burn = this.burn
-    if (!burn || this.glError) return
+    const sim = this.sim
+    if (!burn || !sim || this.glError || this.restoring) return
     const store = this.store
-    const setup = this.setup
+    let setup = this.setup
     try {
       if (store && setup && store.count > 0) {
         if (p.full) {
           p.full = p.coarse = false
-          this.times.full = this.timed(() => burn.runFull(store, setup, this.cutoffS()))
+          // Tiles that fit the GPU's budget next to everything already on it (BURN-36).
+          const fitted = sim.fit(store, setup, burn.full)
+          if (fitted !== setup) this.adoptPlan((setup = fitted))
+          const run = setup
+          this.times.full = this.timed(() => {
+            const result = burn.runFull(store, run, this.cutoffS())
+            // A pool still refused: the run fell back to smaller tiles.
+            if (result.replanned) this.adoptPlan((setup = { ...run, plan: result.plan }))
+          })
           this.coarseShown = false
           this.status = 'ready'
           this.refreshSummary()
@@ -703,7 +791,8 @@ class BurnEngine {
         } else if (p.coarse) {
           p.coarse = false
           burn.clearDetail()
-          const ms = this.timed(() => burn.runCoarse(store, setup, this.cutoffS()))
+          const run = setup
+          const ms = this.timed(() => burn.runCoarse(store, run, this.cutoffS()))
           this.times.coarse = ms
           if (this.live) this.lastLiveRunMs = ms
           this.coarseShown = true
@@ -714,8 +803,10 @@ class BurnEngine {
         }
         if (p.detail) {
           p.detail = false
-          const rect = this.canvasSize.width ? visibleCells(setup.grid, this.deviceView(), this.canvas!.width, this.canvas!.height) : null
-          if (rect && this.wantsDetail()) this.times.detail = this.timed(() => burn.runDetail(store, setup, rect, this.cutoffS()))
+          const grid = setup.grid
+          const rect = this.canvasSize.width ? visibleCells(grid, this.deviceView(), this.canvas!.width, this.canvas!.height) : null
+          const run = setup
+          if (rect && this.wantsDetail()) this.times.detail = this.timed(() => burn.runDetail(store, run, rect, this.cutoffS()))
           this.rendering = false
           p.draw = true
         }
@@ -727,8 +818,14 @@ class BurnEngine {
         this.times.draw = performance.now() - t0
       }
     } catch (e) {
-      this.glError = String(e instanceof Error ? e.message : e)
       console.error(e)
+      if (e instanceof GlContextLostError || this.gl?.isContextLost()) {
+        // The run found the context dead, maybe before the browser said so: wait for the restore.
+        this.contextLost()
+        return
+      }
+      this.rendering = false
+      this.glError = e instanceof GlAllocationError ? OUT_OF_GPU_MEMORY_MESSAGE : String(e instanceof Error ? e.message : e)
     }
   }
 

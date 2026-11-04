@@ -296,6 +296,13 @@
           <p>{burn.glError}</p>
         </div>
       </div>
+    {:else if burn.restoring}
+      <div class="center">
+        <div class="card" role="status">
+          <strong>Restoring the burn view…</strong>
+          <p>The graphics driver reset the GPU. Your job is kept and re-renders once the view is back.</p>
+        </div>
+      </div>
     {:else if app.source === 'live' && !shownJob}
       <div class="center">
         <div class="card plain">
