@@ -24,7 +24,8 @@ import type { MachineProfile, MaterialProfile } from 'aria-burn-core/contract'
 import { app } from './app.svelte.ts'
 import { burn } from './burn.svelte.ts'
 import { isTauri, saveExport } from './ipc.ts'
-import { addReading, emptyMachineReadings, readingFromCell, removeReading, type MachineReadingsLibrary, type ReadingInput } from './machine-readings.ts'
+import { addReading, emptyMachineReadings, machineKey, moveReadings, readingFromCell, removeReading, type MachineReading, type MachineReadingsLibrary, type ReadingInput } from './machine-readings.ts'
+import { applyScanOffset } from './machine-session.ts'
 import { addSetting, emptyMaterialSettings, removeSetting, settingFromCell, type MaterialSettingsLibrary } from './material-settings.ts'
 import { loadMachineReadings, loadMaterialSettings, saveMachineReadings, saveMaterialSettings } from './settings.ts'
 
@@ -148,6 +149,20 @@ class CalibrationState {
     this.readings = next
     this.note = 'Reading saved'
     setTimeout(() => (this.note = null), 5000)
+  }
+
+  /**
+   * Applies scan offset readings to the live machine (BURN-48) and keeps them
+   * with it: when a built-in is copied, they move to the copy. Returns the copy, if any.
+   */
+  async applyScanOffsetReadings(readings: readonly MachineReading[], curve: Parameters<typeof applyScanOffset>[1]) {
+    const copy = await applyScanOffset(app, curve)
+    if (copy) {
+      const next = moveReadings(this.readings, readings.map((r) => r.id), machineKey(app.settings.machine))
+      await saveMachineReadings(next)
+      this.readings = next
+    }
+    return copy
   }
 
   async removeReading(id: string): Promise<void> {

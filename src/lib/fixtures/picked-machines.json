@@ -70,6 +70,7 @@
       "x": 400,
       "y": 415
     },
+    "scanOffsetMm": [],
     "spot": {
       "sigmaXMm": 0.03,
       "sigmaYMm": 0.02,
@@ -103,7 +104,7 @@
     "provenance": {
       "source": "provisional",
       "label": "provisional — vendor figures, not measured on a real laser",
-      "notes": "PROVISIONAL fields: frame.maxRateMmPerMin, frame.accelMmPerS2, module.opticalPowerW, module.spot, module.powerCurve. Frame: Frame values marked sourced come from manufacturer specs or published $$ dumps; the rest are assumed common GRBL defaults. Sources: src/profiles/catalog/SOURCES.md#creality-falcon2 Module: PROVISIONAL - not validated against real burns. Optical power and spot are vendor marketing figures; the power curve is the generic NUBM-class diode curve (src/profiles/provisional/SOURCES.md §1). BURN-12 replaces these. Sources: src/profiles/catalog/SOURCES.md#creality-falcon2-40w"
+      "notes": "PROVISIONAL fields: frame.maxRateMmPerMin, frame.accelMmPerS2, frame.scanOffsetMm, module.opticalPowerW, module.spot, module.powerCurve. Frame: Frame values marked sourced come from manufacturer specs or published $$ dumps; the rest are assumed common GRBL defaults. Sources: src/profiles/catalog/SOURCES.md#creality-falcon2 Module: PROVISIONAL - not validated against real burns. Optical power and spot are vendor marketing figures; the power curve is the generic NUBM-class diode curve (src/profiles/provisional/SOURCES.md §1). BURN-12 replaces these. Sources: src/profiles/catalog/SOURCES.md#creality-falcon2-40w"
     }
   }
 }

@@ -252,4 +252,5 @@ export const FIELD_LABELS: Record<ProfileField, string> = {
   maxRateMmPerMin: 'Max rate ($110/$111)',
   accelMmPerS2: 'Acceleration ($120/$121)',
   travelMm: 'Travel ($130/$131)',
+  scanOffsetMm: 'Scan offset',
 }

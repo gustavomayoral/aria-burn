@@ -419,3 +419,44 @@ fn curve_lookup_matches_the_contract() {
     assert!((interpolate(&curve, 0.15) - 0.09).abs() < 1e-12);
     assert_eq!(interpolate(&curve, 1.5), 1.0);
 }
+
+#[test]
+fn scan_offset_shifts_reverse_x_lines_only() {
+    // BURN-48: 0.2 mm at 1500 mm/min, 0.6 mm at 6000; at 3000 that is 0.2 + 1500 / 4500 × 0.4.
+    let curve = vec![
+        ScanOffsetPoint { feed_mm_per_min: 1500.0, offset_mm: 0.2 },
+        ScanOffsetPoint { feed_mm_per_min: 6000.0, offset_mm: 0.6 },
+    ];
+    let expected = 0.2 + 1500.0 / 4500.0 * 0.4;
+    assert_eq!(scan_offset_at(&[], 3000.0), 0.0);
+    assert_close(scan_offset_at(&curve, 750.0), 0.1, 1e-12);
+    assert_close(scan_offset_at(&curve, 3000.0), expected, 1e-12);
+    assert_eq!(scan_offset_at(&curve, 12000.0), 0.6);
+    assert!(is_reverse_scan((-1.0, 0.0)) && !is_reverse_scan((1.0, 0.0)) && !is_reverse_scan((-0.7, 0.7)));
+
+    let fill = |p: &mut GrblPlanner| {
+        // Forward along +X at y = 0, rapid up, back along -X at y = 1.
+        p.push(g1(20.0, 0.0, 3000.0, 1000.0));
+        p.push(with(g1(20.0, 1.0, 3000.0, 0.0), |b| b.rapid = true));
+        p.push(g1(0.0, 1.0, 3000.0, 1000.0));
+        run(p)
+    };
+    let base = fill(&mut planner());
+    let mut shifted = test_profile();
+    shifted.scan_offset_mm = curve;
+    let got = fill(&mut GrblPlanner::new(&GrblSettings::new(shifted)));
+    assert_eq!(got.len(), base.len());
+    let (mut forward, mut reverse) = (0, 0);
+    for ((ta, a), (tb, b)) in base.iter().zip(&got) {
+        assert_eq!(ta, tb);
+        assert_eq!((a.y_mm, a.dt_s, a.speed_mm_per_s, a.power_w), (b.y_mm, b.dt_s, b.speed_mm_per_s, b.power_w));
+        if a.y_mm < 0.5 {
+            assert_eq!(a.x_mm, b.x_mm);
+            forward += 1;
+        } else {
+            assert_close((b.x_mm - a.x_mm) as f64, -expected, 1e-5);
+            reverse += 1;
+        }
+    }
+    assert!(forward > 0 && reverse > 0);
+}

@@ -8,8 +8,9 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { app } from './app.svelte.ts'
 import { burn } from './burn.svelte.ts'
 import { calibration, patternFileName } from './calibration.svelte.ts'
-import { addReading, emptyMachineReadings, readMachineReadings, readingFromCell } from './machine-readings.ts'
+import { addReading, describeScanOffset, emptyMachineReadings, readMachineReadings, readingFromCell, readingsForProfile, scanOffsetFromReadings } from './machine-readings.ts'
 import { findMaterial } from './materials.ts'
+import { emptyLibrary } from './machines.ts'
 import { defaultSettings, useBackend, type Backend } from './settings.ts'
 
 function storeFile() {
@@ -74,7 +75,7 @@ describe('machine readings', () => {
     expect(byKind['focus-height']).toMatchObject({ field: 'LaserModule.spot', zOffsetMm: focus.cells[3]!.extra!.zOffsetMm, lineWidthMm: 0.12 })
     expect(byKind['scan-offset']).toMatchObject({
       field: 'MachineFrame.scanOffsetMm',
-      inContract: false,
+      inContract: true, // BURN-48 added the field
       feedMmPerMin: scan.cells[2]!.settings.feedMmPerMin,
       shiftMm: 0.15,
     })
@@ -102,5 +103,51 @@ describe('machine readings', () => {
   it('refuses a pattern that is not a measurement pattern', () => {
     const grid = generatePattern('grid', machine, wood)
     expect(() => readingFromCell(grid, grid.cells[0]!)).toThrow()
+  })
+})
+
+describe('applying scan offset readings (BURN-48)', () => {
+  const p = generatePattern('scan-offset', machine, wood)
+  const pick = (i: number, shiftMm: number, at: number) => readingFromCell(p, p.cells[i]!, { shiftMm }, new Date(at))
+
+  it('turns a machine’s readings into the contract curve, by feed', () => {
+    let lib = emptyMachineReadings()
+    lib = addReading(lib, pick(2, 0.2, 2))
+    lib = addReading(lib, pick(0, 0.05, 1))
+    lib = addReading(lib, pick(2, 0.25, 3)) // replaces the first pick at that feed
+    const readings = readingsForProfile(lib, 'scan-offset', machine)
+    const curve = scanOffsetFromReadings(readings)
+    expect(curve).toEqual([
+      { feedMmPerMin: p.cells[0]!.settings.feedMmPerMin, offsetMm: 0.05 },
+      { feedMmPerMin: p.cells[2]!.settings.feedMmPerMin, offsetMm: 0.25 },
+    ])
+    expect(describeScanOffset(curve)).toMatch(/^0.05 mm at \d+ · 0.25 mm at \d+ mm\/min$/)
+    expect(describeScanOffset([])).toMatch(/^None/)
+    // The pattern now names a contract field.
+    expect(readings[0]!.inContract).toBe(true)
+  })
+
+  it('applied to a built-in, the readings move to the copy it is saved as', async () => {
+    useBackend(storeFile().boot())
+    app.settings = defaultSettings()
+    app.library = emptyLibrary()
+    let lib = emptyMachineReadings()
+    lib = addReading(lib, pick(0, 0.05, 1))
+    lib = addReading(lib, pick(2, 0.25, 2))
+    calibration.readings = lib
+    const readings = readingsForProfile(lib, 'scan-offset', app.settings.machine)
+    const copy = await calibration.applyScanOffsetReadings(readings, scanOffsetFromReadings(readings))
+    expect(copy!.name).toMatch(/copy$/)
+    expect(app.settings.machine.name).toBe(copy!.name)
+    expect(app.settings.machine.scanOffsetMm).toHaveLength(2)
+    expect(readingsForProfile(calibration.readings, 'scan-offset', app.settings.machine).map((r) => r.id)).toEqual(readings.map((r) => r.id))
+  })
+
+  it('a copy of a catalog machine finds the readings burned on the built-in', () => {
+    const catalog = { ...machine, name: 'Sculpfun S30 + S30 Pro 10 W', frameId: 'sculpfun-s30', moduleId: 'sculpfun-s30-pro-10w' }
+    const q = generatePattern('scan-offset', catalog, wood)
+    const lib = addReading(emptyMachineReadings(), readingFromCell(q, q.cells[1]!, { shiftMm: 0.1 }))
+    expect(readingsForProfile(lib, 'scan-offset', { ...catalog, name: 'Sculpfun S30 + S30 Pro 10 W copy' })).toHaveLength(1)
+    expect(readingsForProfile(lib, 'scan-offset', { ...catalog, name: 'Other', moduleId: 'sculpfun-s30-5w' })).toHaveLength(0)
   })
 })

@@ -174,6 +174,43 @@ describe('machine session', () => {
     expect(session.activeMachine(restarted)!.profile).toMatchObject({ junctionDeviationMm: 0.02, accelMmPerS2: { x: 2000, y: 1000 } })
   })
 
+  it('applies a scan offset curve: a built-in is copied, the field is the user’s, a sender write keeps it (BURN-48)', async () => {
+    const app = await startApp()
+    await session.pickCatalog(app, 'sculpfun-s30', 'sculpfun-s30-pro-10w')
+    expect(app.settings.machine.scanOffsetMm).toEqual([])
+    expect(app.settings.machineStatus.scanOffsetMm).toBe('provisional')
+    const curve = [
+      { feedMmPerMin: 1000, offsetMm: 0.05 },
+      { feedMmPerMin: 6000, offsetMm: 0.3 },
+    ]
+    const copy = await session.applyScanOffset(app, curve)
+    expect(copy).not.toBeNull()
+    expect(app.library.activeId).toBe(copy!.id)
+    expect(builtinMachine(S30)!.profile.scanOffsetMm).toEqual([])
+    expect(session.activeMachine(app)!.profile.scanOffsetMm).toEqual(curve)
+    expect(app.settings.machineStatus.scanOffsetMm).toBe('user')
+    expect(app.emulated.at(-1)!.profile.scanOffsetMm).toEqual(curve)
+    // The Rust side drops scanOffsetMm when it serializes an empty one, and a sender can't write it: the live value stays.
+    const { scanOffsetMm: _, ...fromRust } = structuredClone(app.settings.machine)
+    expect(await session.senderWrote(app, { ...fromRust, junctionDeviationMm: 0.02 })).toBeNull()
+    expect(app.settings.machine.scanOffsetMm).toEqual(curve)
+    expect(app.settings.machineStatus.scanOffsetMm).toBe('user')
+    // Out of order is refused, and nothing changes.
+    await expect(session.applyScanOffset(app, [...curve].reverse())).rejects.toThrow(/feedMmPerMin/)
+    expect(app.settings.machine.scanOffsetMm).toEqual(curve)
+
+    const restarted = await startApp()
+    expect(session.activeMachine(restarted)!.profile.scanOffsetMm).toEqual(curve)
+  })
+
+  it('a sender write to a catalog machine without an offset is not an edit (BURN-48)', async () => {
+    const app = await startApp()
+    await session.pickCatalog(app, 'sculpfun-s30', 'sculpfun-s30-pro-10w')
+    const { scanOffsetMm: _, ...fromRust } = structuredClone(app.settings.machine)
+    expect(await session.senderWrote(app, fromRust)).toBeNull()
+    expect(JSON.stringify(app.settings.machine)).toBe(JSON.stringify(builtinMachine(S30)!.profile))
+  })
+
   it('ignores an invalid write from the sender', async () => {
     const app = await startApp()
     const bad = { ...structuredClone(app.settings.machine), sMax: -1 }

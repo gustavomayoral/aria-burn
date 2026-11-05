@@ -7,7 +7,7 @@
 // Written against a small host interface so the app (Svelte state) and the
 // tests (a plain object over an in-memory store) run the same code.
 
-import type { MachineProfile } from 'aria-burn-core/contract'
+import type { MachineProfile, ScanOffsetPoint } from 'aria-burn-core/contract'
 import { applyLbdev, applySettingsDump, markUser, type ImportReport, type LbdevImport } from './machine-import.ts'
 import {
   BUILTIN_DEFAULT_ID,
@@ -137,6 +137,22 @@ export async function saveSettingsScreen(host: MachineHost): Promise<Machine | n
   return copied
 }
 
+/**
+ * Applies a scan offset curve (from the user's saved readings, BURN-48) to the
+ * live profile and saves it as the settings screen's Save does: into the
+ * active user machine, or into a copy of a built-in. The field becomes the
+ * user's. An empty curve clears the offset. Returns the copy, if one was made.
+ */
+export async function applyScanOffset(host: MachineHost, curve: readonly ScanOffsetPoint[]): Promise<Machine | null> {
+  const next = { ...plain(host.settings.machine), scanOffsetMm: curve.map((p) => ({ ...p })) }
+  const problems = machineProblems(next)
+  if (problems.length) throw new Error(problems[0])
+  host.settings.machine = next
+  const copy = await saveSettingsScreen(host)
+  await host.applyEmulator()
+  return copy
+}
+
 /** Pasted `$$` output: applied to the live profile, kept when the user saves. */
 export function importDump(host: MachineHost, dump: string): ImportReport {
   const report = applySettingsDump(host.settings.machine, dump)
@@ -169,7 +185,12 @@ export async function importLbdev(host: MachineHost, text: string, device = 0): 
  * profile takes them, and so does the active user machine. A built-in is never
  * written: the change goes into a copy that becomes active. Returns the copy, if any.
  */
-export async function senderWrote(host: MachineHost, profile: MachineProfile): Promise<Machine | null> {
+export async function senderWrote(host: MachineHost, written: MachineProfile): Promise<Machine | null> {
+  // A sender can't write the scan offset (it is no `$` setting), and the Rust
+  // side drops an empty one when it serializes: keep the live profile's. The
+  // overlay also keeps the live profile's key order, which the "edited" check compares.
+  const { scanOffsetMm: _notWritable, ...rest } = written
+  const profile: MachineProfile = { ...plain(host.settings.machine), ...rest }
   const problems = machineProblems(profile)
   if (problems.length) {
     host.warnings = [...host.warnings, `Ignored $ settings from the sender: ${problems[0]}`]

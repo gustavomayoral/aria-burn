@@ -39,11 +39,17 @@
 //! n = max(1, ceil(T / SAMPLE_DT_MAX_S), ceil(L / grid pitch)) equal-time
 //! intervals, one sample at each interval's midpoint. A phase cut short by a
 //! replan ends with one shorter interval.
+//!
+//! Scan offset (BURN-48, not GRBL): samples of beam-on reverse X scan blocks
+//! (within 1° of -X) are shifted along X by -offset at the block's programmed
+//! rate, read from the profile's `scanOffsetMm` (contract `scanOffsetAt`,
+//! `isReverseScan`). Timing, speed and power don't change, and with no offset
+//! every sample is as before.
 
 use std::collections::VecDeque;
 
 use aria_burn_contract::{
-    JobModel, LaserMode, MachineProfile, Move, MoveKind, PowerCurvePoint, sample_batch::MotionSample,
+    JobModel, LaserMode, MachineProfile, Move, MoveKind, PowerCurvePoint, ScanOffsetPoint, sample_batch::MotionSample,
 };
 
 use crate::settings::GrblSettings;
@@ -260,6 +266,8 @@ struct Prep {
 pub struct GrblPlanner {
     cfg: Config,
     curve: Vec<PowerCurvePoint>,
+    /// The profile's scan offset (BURN-48); empty for none.
+    scan_offset: Vec<ScanOffsetPoint>,
     /// Items not yet in the planner (GRBL's serial buffer).
     incoming: VecDeque<Item>,
     /// The block ring, tail (executing) first.
@@ -291,6 +299,7 @@ impl GrblPlanner {
         Self {
             cfg: config(settings),
             curve: settings.profile().power_curve.clone(),
+            scan_offset: settings.profile().scan_offset_mm.clone(),
             incoming: VecDeque::new(),
             buf: VecDeque::new(),
             planned: 0,
@@ -670,9 +679,15 @@ impl GrblPlanner {
         let b = &self.buf[0];
         let power = self.power_w(b, v);
         (power > 0.0).then(|| {
+            let shift = if is_reverse_scan(b.unit) {
+                // The rate the move runs at when not limited: programmed feed, capped by the axis max rate.
+                scan_offset_at(&self.scan_offset, b.programmed_rate.min(b.rapid_rate) * 60.0)
+            } else {
+                0.0
+            };
             let sample = MotionSample {
                 t_rel_s: 0.0,
-                x_mm: (b.target.0 - b.unit.0 * mm) as f32,
+                x_mm: (b.target.0 - b.unit.0 * mm - shift) as f32,
                 y_mm: (b.target.1 - b.unit.1 * mm) as f32,
                 dt_s: dt as f32,
                 speed_mm_per_s: v as f32,
@@ -850,6 +865,7 @@ impl Planner for GrblPlanner {
     fn configure(&mut self, settings: &GrblSettings) {
         self.cfg = config(settings);
         self.curve = settings.profile().power_curve.clone();
+        self.scan_offset = settings.profile().scan_offset_mm.clone();
     }
 
     fn queued(&self) -> usize {
@@ -1005,6 +1021,34 @@ pub fn interpolate(curve: &[PowerCurvePoint], s: f64) -> f64 {
         }
     }
     last.power
+}
+
+/// `SCAN_OFFSET_ANGLE_DEG` (machine.ts): reverse scan lines lie within this angle of -X.
+pub const SCAN_OFFSET_ANGLE_DEG: f64 = 1.0;
+
+/// Whether a block with this unit direction is a reverse X scan line (machine.ts `isReverseScan`).
+pub fn is_reverse_scan(unit: (f64, f64)) -> bool {
+    unit.0 < 0.0 && unit.1.abs() <= unit.0.abs() * SCAN_OFFSET_ANGLE_DEG.to_radians().tan()
+}
+
+/// Scan offset (mm) at a programmed feed (machine.ts `scanOffsetAt`): linear
+/// from 0 at feed 0 to the first point, linear between points, flat past the last.
+pub fn scan_offset_at(curve: &[ScanOffsetPoint], feed_mm_per_min: f64) -> f64 {
+    let Some(last) = curve.last() else { return 0.0 };
+    if !(feed_mm_per_min > 0.0) {
+        return 0.0;
+    }
+    if feed_mm_per_min >= last.feed_mm_per_min {
+        return last.offset_mm;
+    }
+    let (mut f0, mut o0) = (0.0, 0.0);
+    for p in curve {
+        if feed_mm_per_min <= p.feed_mm_per_min {
+            return o0 + (feed_mm_per_min - f0) / (p.feed_mm_per_min - f0) * (p.offset_mm - o0);
+        }
+        (f0, o0) = (p.feed_mm_per_min, p.offset_mm);
+    }
+    last.offset_mm
 }
 
 /// Planner items for a parsed job. GRBL syncs the spindle between moves on any

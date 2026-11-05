@@ -5,7 +5,10 @@
   import { describeConnection } from '../lib/emulator.ts'
   import { TILE_MAX_CELLS, gridPitchMm } from 'aria-burn-core/contract'
   import type { ProfileField } from 'aria-burn-core/contract'
-  import { liveStatus, saveSettingsScreen } from '../lib/machine-session.ts'
+  import { calibration } from '../lib/calibration.svelte.ts'
+  import { activeMachine, applyScanOffset, liveStatus, saveSettingsScreen } from '../lib/machine-session.ts'
+  import { describeReading, readingsForProfile, scanOffsetFromReadings } from '../lib/machine-readings.ts'
+  import { isBuiltin } from '../lib/machines.ts'
   import { machineProblems } from '../lib/settings.ts'
   import MachinesSection from './MachinesSection.svelte'
 
@@ -42,6 +45,25 @@
       setTimeout(() => (saved = false), savedAs ? 4000 : 1500)
     } catch (e) {
       saveError = String(e)
+    }
+  }
+
+  // Scan offset (BURN-48): saved readings are applied to the machine only when the user says so.
+  const scanReadings = $derived(readingsForProfile(calibration.readings, 'scan-offset', m))
+  const fromReadings = $derived(scanOffsetFromReadings(scanReadings))
+  const applied = $derived(m.scanOffsetMm ?? [])
+  const readingsApplied = $derived(fromReadings.length > 0 && JSON.stringify(fromReadings) === JSON.stringify(applied))
+  const target = $derived(activeMachine(app))
+  let scanNote = $state<{ tone: 'ok' | 'danger'; text: string } | null>(null)
+
+  async function applyScan(curve: typeof applied, done: string) {
+    scanNote = null
+    try {
+      // Applying the readings keeps them with the machine (a built-in's copy, if one is made).
+      const copy = curve.length ? await calibration.applyScanOffsetReadings(scanReadings, curve) : await applyScanOffset(app, curve)
+      scanNote = { tone: 'ok', text: copy ? `${done} Saved as “${copy.name}” (built-ins are read-only).` : done }
+    } catch (e) {
+      scanNote = { tone: 'danger', text: e instanceof Error ? e.message : String(e) }
     }
   }
 
@@ -157,6 +179,57 @@
           </label>
         </div>
         <p class="note">Detail pitch {pitchMm.toFixed(4)} mm (spot σ ÷ 3), used when zoomed in and for the hover readout. On GPUs that can't render a large job at this pitch quickly (integrated Intel graphics), the full-job overview uses a whole multiple of it. Tiling follows each job’s burn area, not the bed: up to {TILE_MAX_CELLS} × {TILE_MAX_CELLS} cells (about {tileMm.toFixed(0)} × {tileMm.toFixed(0)} mm at the detail pitch) renders as one tile; larger jobs are split into tiles.</p>
+      </section>
+
+      <section aria-labelledby="scan-offset-title">
+        <div class="row-between">
+          <h2 id="scan-offset-title">Scan offset</h2>
+          <span>{@render prov('scanOffsetMm')}{#if status.scanOffsetMm === 'user'}<span class="tag measured">from readings</span>{/if}</span>
+        </div>
+        <p class="note">
+          On bidirectional fills, lines scanned right to left land a little apart from lines scanned left to right, more so at speed. The simulator shifts
+          each right-to-left (−X) scan line by the offset at its feed: linear between the feeds below, from 0 at a standstill, flat above the fastest.
+          Positive means those lines land further left.
+        </p>
+        <div class="field">
+          <span>Applied to this machine</span>
+          {#if applied.length}
+            <table class="offsets">
+              <thead><tr><th scope="col">Feed (mm/min)</th><th scope="col">Offset (mm)</th></tr></thead>
+              <tbody>
+                {#each applied as p (p.feedMmPerMin)}<tr><td>{p.feedMmPerMin}</td><td>{p.offsetMm > 0 ? '+' : ''}{p.offsetMm}</td></tr>{/each}
+              </tbody>
+            </table>
+          {:else}
+            <span class="value">None: reverse lines land where they are programmed.</span>
+          {/if}
+        </div>
+        {#if scanReadings.length}
+          <div class="field">
+            <span>Saved readings{readingsApplied ? ' (applied)' : ' (not applied)'}</span>
+            <ul class="readings">
+              {#each scanReadings as r (r.id)}<li>{describeReading(r)}</li>{/each}
+            </ul>
+          </div>
+        {:else}
+          <p class="hint">No saved scan offset readings for this machine. Burn the Scan offset test pattern, measure each strip, and enter it on the pick card.</p>
+        {/if}
+        <div class="actions">
+          {#if scanReadings.length}
+            <button class="btn primary" disabled={readingsApplied || problems.length > 0} onclick={() => applyScan(fromReadings, `Applied ${fromReadings.length} reading${fromReadings.length === 1 ? '' : 's'}.`)}>
+              {readingsApplied ? 'Applied to' : `Apply ${fromReadings.length} reading${fromReadings.length === 1 ? '' : 's'} to`} {target?.name ?? 'this machine'}
+            </button>
+          {/if}
+          {#if applied.length}
+            <button class="btn" disabled={problems.length > 0} onclick={() => applyScan([], 'Scan offset cleared.')}>Clear offset</button>
+          {/if}
+        </div>
+        {#if target && isBuiltin(target.id) && scanReadings.length && !readingsApplied}
+          <p class="hint">{target.name} is built in, so applying saves your own copy of it, with any other edits on this screen.</p>
+        {:else if scanReadings.length && !readingsApplied}
+          <p class="hint">Applying saves the machine, with any other edits on this screen.</p>
+        {/if}
+        {#if scanNote}<div class="callout" class:danger={scanNote.tone === 'danger'} role="status">{scanNote.text}</div>{/if}
       </section>
 
       <section>
@@ -354,6 +427,57 @@
     font-size: var(--text-2xs);
     line-height: var(--leading-2xs);
     white-space: nowrap;
+  }
+  .tag.measured {
+    display: inline-block;
+    margin-left: 4px;
+    padding: 0 6px;
+    border-radius: 999px;
+    border: 1px solid var(--accent-border);
+    background: var(--accent-soft);
+    color: var(--accent-text);
+    font-size: var(--text-2xs);
+    line-height: var(--leading-2xs);
+    white-space: nowrap;
+  }
+  .offsets {
+    align-self: flex-start;
+    border-collapse: collapse;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    line-height: var(--leading-xs);
+    color: var(--fg);
+  }
+  .offsets th {
+    font-family: var(--font-condensed);
+    font-weight: normal;
+    color: var(--fg-muted);
+    text-align: right;
+    padding: 2px 12px 2px 0;
+    border-bottom: 1px solid var(--line-subtle);
+  }
+  .offsets td {
+    text-align: right;
+    padding: 2px 12px 2px 0;
+  }
+  .value {
+    font-family: var(--font-sans);
+    font-size: var(--text-ui);
+    line-height: var(--leading-ui);
+    color: var(--fg);
+  }
+  .readings {
+    margin: 0;
+    padding-left: 16px;
+    font-family: var(--font-sans);
+    font-size: var(--text-ui);
+    line-height: var(--leading-ui);
+    color: var(--fg);
+  }
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
   }
   label .tag.prov {
     display: inline-block;

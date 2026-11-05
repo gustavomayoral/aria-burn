@@ -7,9 +7,13 @@
 // persistence is in settings.ts (store key `machineReadings`).
 //
 // Readings are kept, not applied: the profile editor and BURN-15's fit decide
-// what to do with them.
+// what to do with them. Scan offset readings are applied only when the user
+// asks (BURN-48): `scanOffsetFromReadings` turns them into the profile's
+// MachineFrame/MachineProfile.scanOffsetMm curve, and machine-session.ts
+// `applyScanOffset` writes it into the machine.
 
 import type { CalibrationPattern, PatternCell, PatternKind } from 'aria-burn-core/calibration'
+import { SCAN_OFFSET_MAX_MM, type MachineProfile, type ScanOffsetPoint } from 'aria-burn-core/contract'
 
 export const MACHINE_READINGS_VERSION = 1
 
@@ -23,7 +27,7 @@ export interface MachineReading {
   machine: { name: string; frameId?: string; moduleId?: string }
   /** Contract field the reading measures, e.g. "LaserModule.powerCurve". */
   field: string
-  /** False when the contract has no field for it yet (scan offset). */
+  /** False when the contract had no field for it when picked (scan offset before BURN-48). */
   inContract: boolean
   materialId: string
   /** Firing threshold: S of the first line that marked (0..$30), and as % of $30. */
@@ -122,6 +126,62 @@ export const removeReading = (lib: MachineReadingsLibrary, id: string): MachineR
 /** Readings of a kind for a machine, scan offsets by feed. */
 export function readingsFor(lib: MachineReadingsLibrary, kind: ReadingKind, machine: MachineReading['machine']): MachineReading[] {
   return lib.readings.filter((r) => r.kind === kind && sameMachine(r.machine, machine)).sort((a, b) => (a.feedMmPerMin ?? 0) - (b.feedMmPerMin ?? 0))
+}
+
+/** The reading key of a profile: what a pattern generated for it records as `machine`. */
+export const machineKey = (p: Pick<MachineProfile, 'name' | 'frameId' | 'moduleId'>): MachineReading['machine'] => ({
+  name: p.name,
+  ...(p.frameId ? { frameId: p.frameId } : {}),
+  ...(p.moduleId ? { moduleId: p.moduleId } : {}),
+})
+
+/**
+ * Readings of a kind for the machine a profile describes: those burned on it
+ * by name; failing that, those burned on the same catalog frame and module
+ * (a built-in that was copied on save keeps its frame and module, not its name).
+ */
+export function readingsForProfile(lib: MachineReadingsLibrary, kind: ReadingKind, profile: Pick<MachineProfile, 'name' | 'frameId' | 'moduleId'>): MachineReading[] {
+  const exact = readingsFor(lib, kind, machineKey(profile))
+  if (exact.length || !profile.frameId || !profile.moduleId) return exact
+  const byFeed = new Map<number, MachineReading>()
+  // Newest pick per feed when several machines on the same frame and module have readings.
+  for (const r of lib.readings)
+    if (r.kind === kind && r.machine.frameId === profile.frameId && r.machine.moduleId === profile.moduleId) {
+      const f = r.feedMmPerMin ?? 0
+      const o = byFeed.get(f)
+      if (!o || o.source.pickedAt < r.source.pickedAt) byFeed.set(f, r)
+    }
+  return [...byFeed.values()].sort((a, b) => (a.feedMmPerMin ?? 0) - (b.feedMmPerMin ?? 0))
+}
+
+/**
+ * Re-keys readings to the machine they were applied to. Applying to a built-in
+ * saves a renamed copy; the readings follow it, so the copy still lists them.
+ */
+export function moveReadings(lib: MachineReadingsLibrary, ids: readonly string[], machine: MachineReading['machine']): MachineReadingsLibrary {
+  const set = new Set(ids)
+  return { ...lib, readings: lib.readings.map((r) => (set.has(r.id) ? { ...r, machine: { ...machine } } : r)) }
+}
+
+/**
+ * The scan offset curve (contract ScanOffsetPoint[], sorted by feed) for a
+ * machine's scan offset readings: one point per feed, offset = the measured
+ * shift. Readings out of the contract's range are left out.
+ */
+export function scanOffsetFromReadings(readings: readonly MachineReading[]): ScanOffsetPoint[] {
+  const byFeed = new Map<number, number>()
+  for (const r of readings) {
+    if (r.kind !== 'scan-offset' || !(typeof r.feedMmPerMin === 'number' && r.feedMmPerMin > 0) || typeof r.shiftMm !== 'number') continue
+    if (!Number.isFinite(r.shiftMm) || Math.abs(r.shiftMm) > SCAN_OFFSET_MAX_MM) continue
+    byFeed.set(r.feedMmPerMin, r.shiftMm)
+  }
+  return [...byFeed].sort(([a], [b]) => a - b).map(([feedMmPerMin, offsetMm]) => ({ feedMmPerMin, offsetMm }))
+}
+
+/** The applied curve as one line: "none", or "0.1 mm at 1000 · 0.3 mm at 6000 mm/min". */
+export function describeScanOffset(curve: readonly ScanOffsetPoint[] | undefined): string {
+  if (!curve?.length) return 'None: reverse lines land where they are programmed'
+  return `${curve.map((p) => `${p.offsetMm} mm at ${p.feedMmPerMin}`).join(' · ')} mm/min`
 }
 
 /** One line for the UI. */

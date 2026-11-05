@@ -12,7 +12,7 @@
 <script lang="ts">
   import { app } from '../lib/app.svelte.ts'
   import { calibration } from '../lib/calibration.svelte.ts'
-  import { describeReading, isReadingKind, readingsFor } from '../lib/machine-readings.ts'
+  import { describeReading, isReadingKind, machineKey, readingsFor, readingsForProfile, scanOffsetFromReadings } from '../lib/machine-readings.ts'
   import { suggestName } from '../lib/material-settings.ts'
   import { findMaterial } from '../lib/materials.ts'
 
@@ -58,7 +58,9 @@
     widthMm = null
     shiftMm = null
   })
-  const saved = $derived(pattern && isReadingKind(pattern.kind) ? readingsFor(calibration.readings, pattern.kind, pattern.machine) : [])
+  const burnedOn = $derived(pattern && isReadingKind(pattern.kind) ? readingsFor(calibration.readings, pattern.kind, pattern.machine) : [])
+  // Scan offset readings applied to a built-in moved to its copy (BURN-48): list them there.
+  const saved = $derived(burnedOn.length || pick !== 'shift' ? burnedOn : readingsForProfile(calibration.readings, 'scan-offset', app.settings.machine))
 
   async function saveReading() {
     saving = true
@@ -69,6 +71,21 @@
       error = e instanceof Error ? e.message : String(e)
     } finally {
       saving = false
+    }
+  }
+  // Scan offset (BURN-48): the saved strips are applied to the machine only on request.
+  const forLiveMachine = $derived(saved.length > 0 && saved.every((r) => JSON.stringify(r.machine) === JSON.stringify(machineKey(app.settings.machine))))
+  const curve = $derived(pick === 'shift' ? scanOffsetFromReadings(saved) : [])
+  const isApplied = $derived(curve.length > 0 && JSON.stringify(curve) === JSON.stringify(app.settings.machine.scanOffsetMm ?? []))
+  let applyNote = $state<string | null>(null)
+  async function applyToMachine() {
+    error = null
+    applyNote = null
+    try {
+      const copy = await calibration.applyScanOffsetReadings(saved, curve)
+      applyNote = copy ? `Applied, saved as “${copy.name}”.` : 'Applied to the machine.'
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e)
     }
   }
   const sameMaterial = $derived(pattern?.material.id === app.settings.ui.materialId)
@@ -122,7 +139,7 @@
           </label>
         {:else if pick === 'shift'}
           <label>
-            Forward/back shift (mm)
+            Forward/back shift (mm, + = back lines land further left)
             <input type="number" min="-5" max="5" step="0.01" bind:value={shiftMm} required />
           </label>
         {/if}
@@ -140,6 +157,14 @@
             </li>
           {/each}
         </ul>
+        {#if pick === 'shift'}
+          {#if forLiveMachine}
+            <button class="btn small" disabled={isApplied} onclick={applyToMachine}>{isApplied ? 'Applied to the machine' : 'Apply to the machine'}</button>
+          {:else}
+            <p class="hint">Burned on {pattern.machine.name}: load that machine to apply these.</p>
+          {/if}
+          {#if applyNote}<p class="hint" role="status">{applyNote}</p>{/if}
+        {/if}
       </div>
     {/if}
     {#if cell && pick === 'best-cell'}
