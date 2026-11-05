@@ -2,10 +2,11 @@
 <!--
   Test patterns (BURN-32): choose a calibration pattern for the active machine
   and material, see where it lands and how long it takes, then preview it in
-  the sim or save its G-code for the laser.
+  the sim or save its G-code for the laser. Measurement patterns (BURN-47) say
+  which contract field they measure; focus height chooses how Z is reached.
 -->
 <script lang="ts">
-  import { patternGenerator } from 'aria-burn-core/calibration'
+  import { MAX_FOCUS_OFFSET_MM, patternGenerator } from 'aria-burn-core/calibration'
   import { app } from '../lib/app.svelte.ts'
   import { PATTERN_KINDS, calibration } from '../lib/calibration.svelte.ts'
   import { findMaterial } from '../lib/materials.ts'
@@ -14,6 +15,13 @@
   const machine = $derived(app.settings.machine)
   const result = $derived(calibration.generate(machine, material, calibration.kind))
   const pattern = $derived(result.pattern)
+  const PICK_NOTE = {
+    'best-cell': 'Burn the saved G-code on your laser. Then preview it here and click the cell that looked best to keep its settings.',
+    'first-visible': 'Burn the saved G-code on your laser. Then preview it here and click the first line that marked: it is kept as a reading for this machine.',
+    thinnest: 'Burn the saved G-code on your laser. Then preview it here and click the thinnest line: it is kept as a reading for this machine.',
+    shift: 'Burn the saved G-code on your laser. Measure each strip’s forward/back shift, then preview it here, click the strip and enter it.',
+  } as const
+  const count = (n: number, pick: string) => `${n} ${pick === 'shift' ? 'strips' : pick === 'best-cell' ? 'cells' : 'lines'}`
 
   let manual = $state(calibration.placement.originMm !== null)
   let ox = $state(calibration.placement.originMm?.x ?? 10)
@@ -77,15 +85,37 @@
           </div>
         {/if}
 
+        {#if calibration.kind === 'focus-height'}
+          <div class="section-label">Z</div>
+          <div class="seg" role="group" aria-label="How Z is reached">
+            <button aria-pressed={calibration.focusZMode === 'pause'} onclick={() => (calibration.focusZMode = 'pause')}>Pause, I move it</button>
+            <button aria-pressed={calibration.focusZMode === 'z-axis'} onclick={() => (calibration.focusZMode = 'z-axis')}>Motorised Z</button>
+          </div>
+          <p class="note">
+            {#if calibration.focusZMode === 'pause'}
+              No Z is commanded. The job turns the beam off and pauses before each line; move the head by the amount shown, then resume.
+            {:else}
+              <strong class="caution">Only for a motorised Z.</strong> Relative steps (G91 G0 Z), head up first, at most ±{MAX_FOCUS_OFFSET_MM} mm from where you focused; the job ends at the Z it started at.
+            {/if}
+            Focus as usual before you start. + is head up, away from the work.
+          </p>
+        {/if}
+
         {#if pattern}
           {@const b = pattern.burnBoundsMm}
           <div class="kv">
             <span>Burn area</span><span>{mm(b.maxXMm - b.minXMm)} × {mm(b.maxYMm - b.minYMm)} mm</span>
             <span>From</span><span>X {mm(b.minXMm)}, Y {mm(b.minYMm)}</span>
             <span>Bed</span><span>{pattern.machine.bedMm.x} × {pattern.machine.bedMm.y} mm</span>
-            <span>Cells</span><span>{pattern.cells.length}</span>
+            <span>Burns</span><span>{count(pattern.cells.length, pattern.pick)}</span>
+            {#if pattern.measures}
+              <span>Measures</span><span><code>{pattern.measures.on}.{pattern.measures.field}</code>{pattern.measures.inContract ? '' : ' (proposed)'}</span>
+            {/if}
             <span>Time</span><span>≥ {fmtTime(pattern.estimatedTimeS)}</span>
           </div>
+          {#if pattern.measures}
+            <p class="note">{pattern.measures.reads}</p>
+          {/if}
           <p class="note">
             Power and speed ranges follow this machine and material. Labels are engraved, and corner marks frame the print for a photo later.
           </p>
@@ -98,7 +128,7 @@
           <button class="btn primary" disabled={!pattern} onclick={() => pattern && calibration.preview(pattern)}>Preview in sim</button>
         </div>
         {#if note}<p class="note" role="status">{note}</p>{/if}
-        <p class="note">Burn the saved G-code on your laser. Then preview it here and click the cell that looked best to keep its settings.</p>
+        <p class="note">{PICK_NOTE[pattern?.pick ?? 'best-cell']}</p>
       </div>
     </div>
   </div>
@@ -220,6 +250,15 @@
     display: flex;
     gap: 8px;
     justify-content: flex-end;
+  }
+  .kv code {
+    font-family: var(--font-mono);
+    font-size: var(--text-2xs);
+    overflow-wrap: anywhere;
+  }
+  .caution {
+    color: var(--warn-text);
+    font-weight: 500;
   }
   .note {
     margin: 0;

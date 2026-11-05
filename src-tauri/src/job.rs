@@ -339,7 +339,8 @@ mod tests {
 
     /// BURN-32: every calibration pattern for every catalog frame + module and
     /// provisional material (written by `src/lib/calibration-patterns.test.ts`)
-    /// parses with no diagnostics into the moves the core's job-model twin
+    /// parses with no diagnostics (but the v1 pause / Z warnings the core
+    /// predicts for the focus pattern, BURN-47) into the moves the core's job-model twin
     /// predicts, and the GRBL planner keeps every sample on the bed.
     #[test]
     fn calibration_patterns_parse_and_plan_clean() {
@@ -354,7 +355,7 @@ mod tests {
         let profiles: std::collections::BTreeMap<String, MachineProfile> =
             serde_json::from_value(index["profiles"].clone()).unwrap();
         let jobs = index["jobs"].as_array().unwrap();
-        assert!(jobs.len() >= profiles.len() * 6, "{} patterns for {} machines", jobs.len(), profiles.len());
+        assert!(jobs.len() >= profiles.len() * 9, "{} patterns for {} machines", jobs.len(), profiles.len());
         // One check per pattern, spread over the cores (a debug-build planner takes ~80 s for all of them on one).
         let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
         let failures: Vec<String> = std::thread::scope(|scope| {
@@ -382,8 +383,17 @@ mod tests {
             assert!(bed.0 <= profile.travel_mm.x && bed.1 <= profile.travel_mm.y, "{file}: bed larger than travel");
             let settings = GrblSettings::new(profile.clone());
             let job = parse_file(file, &std::fs::read(dir.join(file)).unwrap(), &settings);
-            if !job.diagnostics.is_empty() {
-                failures.push(format!("{file}: {:?}", job.diagnostics));
+            // Only the v1 warnings the core predicts (BURN-47's focus pattern pauses or steps Z), at the same lines.
+            let got: Vec<(String, u64)> =
+                job.diagnostics.iter().map(|d| (d.code.to_string(), u64::from(d.line))).collect();
+            let want: Vec<(String, u64)> = entry["diagnostics"]
+                .as_array()
+                .map(|a| {
+                    a.iter().map(|d| (d["code"].as_str().unwrap().to_string(), d["line"].as_u64().unwrap())).collect()
+                })
+                .unwrap_or_default();
+            if got != want {
+                failures.push(format!("{file}: diagnostics {:?}, the core predicts {want:?}", job.diagnostics));
                 return failures;
             }
             if job.moves.len() as u64 != entry["moveCount"].as_u64().unwrap() {

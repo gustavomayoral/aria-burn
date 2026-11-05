@@ -4,14 +4,29 @@
 // the same parser and planner as any file, save it for the laser, and after
 // the real burn "pick the best cell": the user clicks the cell that looked
 // right and its settings are kept as a named material setting.
+//
+// BURN-47's measurement patterns pick differently (the pattern's `pick`): the
+// first line that marked (firing threshold), the thinnest line (focus height),
+// or a strip whose forward/back shift the user measured (scan offset). Those
+// picks are kept as machine readings, not material settings.
 
-import { PATTERN_KINDS, PatternFitError, cellAt, generatePattern, type CalibrationPattern, type PatternCell, type PatternKind } from 'aria-burn-core/calibration'
+import {
+  PATTERN_KINDS,
+  PatternFitError,
+  cellAt,
+  generatePattern,
+  type CalibrationPattern,
+  type FocusZMode,
+  type PatternCell,
+  type PatternKind,
+} from 'aria-burn-core/calibration'
 import type { MachineProfile, MaterialProfile } from 'aria-burn-core/contract'
 import { app } from './app.svelte.ts'
 import { burn } from './burn.svelte.ts'
 import { isTauri, saveExport } from './ipc.ts'
+import { addReading, emptyMachineReadings, readingFromCell, removeReading, type MachineReadingsLibrary, type ReadingInput } from './machine-readings.ts'
 import { addSetting, emptyMaterialSettings, removeSetting, settingFromCell, type MaterialSettingsLibrary } from './material-settings.ts'
-import { loadMaterialSettings, saveMaterialSettings } from './settings.ts'
+import { loadMachineReadings, loadMaterialSettings, saveMachineReadings, saveMaterialSettings } from './settings.ts'
 
 export { PATTERN_KINDS }
 
@@ -28,16 +43,21 @@ class CalibrationState {
   open = $state(false)
   kind = $state<PatternKind>('grid')
   placement = $state<PlacementInput>({ originMm: null })
+  /** Focus height: pause for the operator (default, no Z commanded) or step a motorised Z. */
+  focusZMode = $state<FocusZMode>('pause')
   /** The pattern opened in the burn view (its cells are what a click picks from). */
   previewed = $state.raw<CalibrationPattern | null>(null)
   selectedId = $state<string | null>(null)
   hoverId = $state<string | null>(null)
   library = $state<MaterialSettingsLibrary>(emptyMaterialSettings())
+  readings = $state<MachineReadingsLibrary>(emptyMachineReadings())
   note = $state<string | null>(null)
 
   async load(): Promise<void> {
-    const { library, warnings } = await loadMaterialSettings()
-    this.library = library
+    const [settings, readings] = await Promise.all([loadMaterialSettings(), loadMachineReadings()])
+    this.library = settings.library
+    this.readings = readings.library
+    const warnings = [...settings.warnings, ...readings.warnings]
     if (warnings.length) app.warnings = [...app.warnings, ...warnings]
   }
 
@@ -45,9 +65,10 @@ class CalibrationState {
   generate(machine: MachineProfile, material: MaterialProfile, kind = this.kind): { pattern: CalibrationPattern | null; error: string | null } {
     try {
       const origin = this.placement.originMm
-      return { pattern: generatePattern(kind, machine, material, origin ? { originMm: origin } : {}), error: null }
+      const pattern = kind === 'focus-height' ? { zMode: this.focusZMode } : undefined
+      return { pattern: generatePattern(kind, machine, material, { ...(origin ? { originMm: origin } : {}), ...(pattern ? { pattern } : {}) }), error: null }
     } catch (e) {
-      return { pattern: null, error: e instanceof PatternFitError ? e.message : String(e) }
+      return { pattern: null, error: e instanceof PatternFitError || e instanceof RangeError ? e.message : String(e) }
     }
   }
 
@@ -88,7 +109,10 @@ class CalibrationState {
 
   cellAt(xMm: number, yMm: number): PatternCell | null {
     const p = this.active
-    return p ? cellAt(p, xMm, yMm) : null
+    if (!p) return null
+    // Lines are a spot wide: take the nearest one within half the line pitch.
+    const pitch = typeof p.options.pitchMm === 'number' ? p.options.pitchMm : 0
+    return cellAt(p, xMm, yMm, p.pick === 'first-visible' || p.pick === 'thinnest' ? Math.max(0.5, pitch / 2) : 0.5)
   }
 
   /** A click on the burn view at (x, y) mm. */
@@ -112,6 +136,24 @@ class CalibrationState {
     this.library = next
     this.note = `Saved “${setting.name}”`
     setTimeout(() => (this.note = null), 5000)
+  }
+
+  /** Keeps the selected line or strip as a machine reading (measurement patterns); survives a restart. */
+  async saveReading(input: ReadingInput = {}): Promise<void> {
+    const p = this.active
+    const c = this.selected
+    if (!p || !c) return
+    const next = addReading(this.readings, readingFromCell(p, c, input))
+    await saveMachineReadings(next)
+    this.readings = next
+    this.note = 'Reading saved'
+    setTimeout(() => (this.note = null), 5000)
+  }
+
+  async removeReading(id: string): Promise<void> {
+    const next = removeReading(this.readings, id)
+    await saveMachineReadings(next)
+    this.readings = next
   }
 
   async remove(id: string): Promise<void> {

@@ -7,6 +7,7 @@
 
 import { isTauri } from '@tauri-apps/api/core'
 import { MachineProfile, checkMachineProfile, validate, type MachineProfile as Machine } from 'aria-burn-core/contract'
+import { readMachineReadings, readingProblems, type MachineReadingsLibrary } from './machine-readings.ts'
 import { readMaterialSettings, settingProblems, type MaterialSettingsLibrary } from './material-settings.ts'
 import { DEFAULT_EXAGGERATION, isExaggeration, type Exaggeration } from './relief.ts'
 import { PROFILE_FIELDS, defaultMachineEntry, readLibrary, type FieldSource, type MachineFieldStatus, type MachineLibrary } from './machines.ts'
@@ -16,6 +17,7 @@ const STORE_FILE = 'settings.json'
 const KEY = 'settings'
 const LIBRARY_KEY = 'machines'
 const MATERIAL_SETTINGS_KEY = 'materialSettings'
+const MACHINE_READINGS_KEY = 'machineReadings'
 
 export type ViewMode = 'color' | 'height'
 
@@ -175,6 +177,19 @@ export async function saveMaterialSettings(library: MaterialSettingsLibrary): Pr
     if (problems.length) throw new Error(`material setting “${s.name}” invalid: ${problems.join('; ')}`)
   }
   await (await getBackend()).write(MATERIAL_SETTINGS_KEY, plainCopy(library))
+}
+
+/** Readings taken off measurement patterns (BURN-47). */
+export async function loadMachineReadings(): Promise<{ library: MachineReadingsLibrary; warnings: string[] }> {
+  return readMachineReadings(await (await getBackend()).read(MACHINE_READINGS_KEY))
+}
+
+export async function saveMachineReadings(library: MachineReadingsLibrary): Promise<void> {
+  for (const r of library.readings) {
+    const problems = readingProblems(r)
+    if (problems.length) throw new Error(`machine reading invalid: ${problems.join('; ')}`)
+  }
+  await (await getBackend()).write(MACHINE_READINGS_KEY, plainCopy(library))
 }
 
 export async function saveSettings(settings: Settings): Promise<void> {
