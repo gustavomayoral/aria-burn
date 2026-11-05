@@ -5,10 +5,12 @@
   import { app } from '../lib/app.svelte.ts'
   import { burn } from '../lib/burn.svelte.ts'
   import { findMaterial } from '../lib/materials.ts'
+  import { EXAGGERATIONS, reliefZ, type Exaggeration } from '../lib/relief.ts'
 
   // Height view (three.js): the core's depth map as a lit mesh, coloured with
-  // the shaded burn. Depth is exaggerated so tenths of a millimetre read on a
-  // job tens of millimetres wide; the factor is shown, the scale bar is true.
+  // the shaded burn. Depth is exaggerated on screen by the user's ×1/×5/×20
+  // pick (BURN-46) so tenths of a millimetre read on a job tens of millimetres
+  // wide; the mesh alone is scaled, the readout, depth scale and exports are true.
   const MESH_MAX = 384
   const COLOR_MAX = 1024
   const YAW0 = -0.5
@@ -22,13 +24,30 @@
   let yaw = $state(YAW0)
   let pitch = $state(PITCH0)
   let distance = $state(1)
-  let exaggeration = $state(1)
+  /** True depth (mm) under each mesh vertex, so a new factor only moves Z. */
+  let vertexDepth: Float32Array | null = null
   let sizeMm = 1
   let frame = 0
   let webglError = $state<string | null>(null)
 
   const material = $derived(findMaterial(app.settings.ui.materialId))
   const flat = $derived(material.response.kind === 'bleach')
+  const exaggeration = $derived(app.settings.ui.reliefExaggeration)
+
+  function setExaggeration(f: Exaggeration) {
+    app.settings.ui.reliefExaggeration = f
+    void app.savePrefs()
+  }
+
+  /** Writes the mesh's Z from the true depths at the current factor. */
+  function applyDepth() {
+    if (!mesh || !vertexDepth) return
+    const pos = mesh.geometry.attributes.position as THREE.BufferAttribute
+    for (let i = 0; i < vertexDepth.length; i++) pos.setZ(i, flat ? 0 : reliefZ(vertexDepth[i]!, exaggeration))
+    pos.needsUpdate = true
+    mesh.geometry.computeVertexNormals()
+    schedule()
+  }
 
   function placeCamera() {
     const r = sizeMm * 2 * distance
@@ -51,18 +70,15 @@
     let max = 0
     for (const d of hm.depthMm) if (d > max) max = d
     burn.depthMaxMm = max
-    // Deepest cut ≈ 3 % of the job's size, never flattened below true scale.
-    exaggeration = max > 0 ? Math.max(1, Math.round((0.03 * sizeMm) / max)) : 1
     const geometry = new THREE.PlaneGeometry(wMm, hMm, cols, rows)
-    const pos = geometry.attributes.position as THREE.BufferAttribute
+    vertexDepth = new Float32Array((rows + 1) * (cols + 1))
     for (let r = 0; r <= rows; r++)
       for (let c = 0; c <= cols; c++) {
         // Plane rows run top (+Y) to bottom; heightmap row 0 is min Y.
         const y = Math.min(hm.height - 1, Math.round(((rows - r) / rows) * (hm.height - 1)))
         const x = Math.min(hm.width - 1, Math.round((c / cols) * (hm.width - 1)))
-        pos.setZ(r * (cols + 1) + c, flat ? 0 : -hm.depthMm[y * hm.width + x]! * exaggeration)
+        vertexDepth[r * (cols + 1) + c] = hm.depthMm[y * hm.width + x]!
       }
-    geometry.computeVertexNormals()
     const tex = new THREE.DataTexture(hm.color, hm.width, hm.height, THREE.RGBAFormat)
     tex.colorSpace = THREE.SRGBColorSpace
     tex.flipY = false
@@ -80,7 +96,7 @@
     mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ map: tex, roughness: 0.85, metalness: 0 }))
     mesh.rotation.x = -Math.PI / 2
     scene.add(mesh)
-    schedule()
+    applyDepth()
   }
 
   function render() {
@@ -138,6 +154,11 @@
     void flat
     rebuild()
   })
+  // A new factor moves the vertices only; the heightmap is not read again.
+  $effect(() => {
+    void exaggeration
+    applyDepth()
+  })
   $effect(() => {
     void yaw
     void pitch
@@ -179,8 +200,17 @@
     <div class="msg">{webglError}</div>
   {:else if flat}
     <div class="msg">Bleach response: marks have no depth, so the relief is flat.</div>
-  {:else if exaggeration > 1}
-    <div class="msg small">Depth exaggerated ×{exaggeration}</div>
+  {/if}
+  {#if !webglError && !flat}
+    <div class="exag" role="group" aria-label="Depth exaggeration, on screen only">
+      <span class="lbl">Depth</span>
+      <div class="seg">
+        {#each EXAGGERATIONS as f (f)}
+          <button aria-pressed={exaggeration === f} onclick={() => setExaggeration(f)}>×{f}</button>
+        {/each}
+      </div>
+      <span class="note">On screen only · readout and exports show true depth</span>
+    </div>
   {/if}
   <div class="controls">
     <button aria-label="Orbit left" onclick={() => (yaw += 0.26)}>
@@ -228,9 +258,52 @@
     font-size: var(--text-xs);
     white-space: nowrap;
   }
-  .msg.small {
-    font-size: var(--text-2xs);
+  .exag {
+    position: absolute;
+    right: 10px;
+    top: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px 6px 8px;
+    background: var(--overlay);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    font-size: var(--text-xs);
+  }
+  .exag .lbl {
+    font-family: var(--font-condensed);
     color: var(--fg);
+  }
+  .exag .note {
+    font-size: var(--text-2xs);
+    color: var(--fg-muted);
+  }
+  .seg {
+    display: flex;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+  }
+  .seg button {
+    height: 24px;
+    padding: 0 8px;
+    border: 0;
+    background: var(--panel);
+    color: var(--fg);
+    font-size: var(--text-xs);
+    font-variant-numeric: tabular-nums;
+  }
+  .seg button + button {
+    border-left: 1px solid var(--line);
+  }
+  .seg button:hover:not([aria-pressed='true']) {
+    background: var(--raised);
+    color: var(--fg-strong);
+  }
+  .seg button[aria-pressed='true'] {
+    background: var(--accent);
+    color: var(--on-accent);
   }
   .controls {
     position: absolute;

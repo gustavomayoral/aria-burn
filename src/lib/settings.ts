@@ -8,6 +8,7 @@
 import { isTauri } from '@tauri-apps/api/core'
 import { MachineProfile, checkMachineProfile, validate, type MachineProfile as Machine } from 'aria-burn-core/contract'
 import { readMaterialSettings, settingProblems, type MaterialSettingsLibrary } from './material-settings.ts'
+import { DEFAULT_EXAGGERATION, isExaggeration, type Exaggeration } from './relief.ts'
 import { PROFILE_FIELDS, defaultMachineEntry, readLibrary, type FieldSource, type MachineFieldStatus, type MachineLibrary } from './machines.ts'
 
 export const SETTINGS_VERSION = 1
@@ -29,6 +30,8 @@ export interface UiPrefs {
   viewMode: ViewMode
   verdictOverlay: boolean
   relief: boolean
+  /** Height (3D) view depth factor, on screen only (BURN-46). */
+  reliefExaggeration: Exaggeration
   materialId: string
 }
 
@@ -47,7 +50,7 @@ export function defaultSettings(): Settings {
     machine: defaultMachineEntry().profile,
     machineStatus: defaultMachineEntry().fieldStatus,
     network: { bindMode: 'localhost', port: 2323, pacing: 'realtime', listening: true },
-    ui: { viewMode: 'color', verdictOverlay: false, relief: true, materialId: 'birch-ply-provisional' },
+    ui: { viewMode: 'color', verdictOverlay: false, relief: true, reliefExaggeration: DEFAULT_EXAGGERATION, materialId: 'birch-ply-provisional' },
   }
 }
 
@@ -94,6 +97,7 @@ export function mergeSettings(stored: unknown): { settings: Settings; warnings: 
       if (k in target && typeof v === typeof target[k]) target[k] = v
     }
   }
+  if (!isExaggeration(settings.ui.reliefExaggeration)) settings.ui.reliefExaggeration = DEFAULT_EXAGGERATION
   return { settings, warnings }
 }
 

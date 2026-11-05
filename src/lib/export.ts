@@ -5,6 +5,7 @@
 
 import { burn } from './burn.svelte.ts'
 import { saveExport } from './ipc.ts'
+import { depthLabel, heightPngValues } from './relief.ts'
 
 const stem = () => (burn.job?.name ?? 'burn').replace(/\.[^.]+$/, '').replace(/[^\w.-]+/g, '_') || 'burn'
 
@@ -79,14 +80,7 @@ export async function exportColor(): Promise<string> {
 export async function exportHeight(): Promise<string> {
   const h = burn.heightmap(4096)
   if (!h) throw new Error('nothing to export yet')
-  const max = h.depthMm.reduce((m, d) => Math.max(m, d), 0)
-  const values = new Uint16Array(h.width * h.height)
-  // Top-down rows; white = surface, black = deepest cut.
-  for (let y = 0; y < h.height; y++)
-    for (let x = 0; x < h.width; x++) {
-      const d = h.depthMm[(h.height - 1 - y) * h.width + x]!
-      values[y * h.width + x] = max > 0 ? Math.round(65535 * (1 - d / max)) : 65535
-    }
-  const depth = max > 0 ? `${(max * 1000).toFixed(0)}um` : 'flat'
+  const { values, maxMm } = heightPngValues(h)
+  const depth = depthLabel(maxMm)
   return saveExport(`${stem()}-height-${depth}-${(h.texelMm * 1000).toFixed(1)}umpx.png`, await gray16Png(h.width, h.height, values))
 }
