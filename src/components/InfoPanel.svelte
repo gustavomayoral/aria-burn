@@ -131,9 +131,10 @@
           <span>Verdict</span><span>Outside the job</span>
         {/if}
       </div>
+      {#if r && r.verdict !== 0}<p class="note">Click to see which moves made this and why.</p>{/if}
     {:else}
       <p class="note">
-        {#if !ready}No job loaded.{:else if isColor}Hover the canvas for position, {thermal ? 'temperature' : 'fluence'} and verdict. Drag to pan, scroll to zoom.{:else}Readout is available in the Color view.{/if}
+        {#if !ready}No job loaded.{:else if isColor}Hover the canvas for position, {thermal ? 'temperature' : 'fluence'} and verdict; click a mark to see why it came out that way. Drag to pan, scroll to zoom.{:else}Readout is available in the Color view.{/if}
       </p>
     {/if}
   </div>

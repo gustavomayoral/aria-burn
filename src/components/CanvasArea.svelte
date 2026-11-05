@@ -11,6 +11,7 @@
   import type { ViewMode } from '../lib/settings.ts'
   import { scaleBar } from '../lib/verdicts.ts'
   import BestCellCard from './BestCellCard.svelte'
+  import ExplainCard from './ExplainCard.svelte'
 
   const VIEW_MODES: { id: ViewMode; label: string }[] = [
     { id: 'color', label: 'Color' },
@@ -23,7 +24,7 @@
   let dragOver = $state(false)
   let exportOpen = $state(false)
   let exportNote = $state<string | null>(null)
-  let drag = $state<{ x: number; y: number; moved: boolean } | null>(null)
+  let drag = $state<{ x: number; y: number; moved: boolean; onCanvas?: boolean } | null>(null)
 
   const ui = $derived(app.settings.ui)
   const material = $derived(findMaterial(ui.materialId))
@@ -99,7 +100,8 @@
   }
   function onDown(e: PointerEvent) {
     if (!hasBurn || !isColor || e.button !== 0) return
-    drag = { x: e.clientX, y: e.clientY, moved: false }
+    // Controls and cards over the canvas (zoom, explanation) take their own clicks.
+    drag = { x: e.clientX, y: e.clientY, moved: false, onCanvas: e.target === canvas }
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
   }
   function onMove(e: PointerEvent) {
@@ -121,12 +123,17 @@
       calibration.hoverAt(m.xMm, m.yMm)
     }
   }
-  /** A click (no drag) on a calibration pattern picks the cell under it (BURN-32). */
+  /**
+   * A click (no drag) on a calibration pattern picks the cell under it
+   * (BURN-32); anywhere else it explains the cell under it (BURN-45).
+   */
   function onUp(e: PointerEvent) {
-    if (drag && !drag.moved && calibration.active) {
+    if (drag && !drag.moved) {
       const p = local(e)
-      const m = burn.toMm(p.x, p.y)
-      calibration.pickAt(m.xMm, m.yMm)
+      if (calibration.active) {
+        const m = burn.toMm(p.x, p.y)
+        calibration.pickAt(m.xMm, m.yMm)
+      } else if (drag.onCanvas) burn.explainAt(p.x, p.y)
     }
     drag = null
   }
@@ -148,6 +155,7 @@
     else if (e.key === 'ArrowRight') burn.panBy(-step, 0)
     else if (e.key === 'ArrowUp') burn.panBy(0, step)
     else if (e.key === 'ArrowDown') burn.panBy(0, -step)
+    else if (e.key === 'Escape' && burn.explained) burn.clearExplained()
     else return
     e.preventDefault()
   }
@@ -157,6 +165,15 @@
   const atMaxZoom = $derived(burn.view.mmPerPx <= burn.minMmPerPx * 1.001)
   const bar = $derived(scaleBar(burn.view.mmPerPx))
   const hoverPx = $derived(burn.hover ? burn.toPx(burn.hover.xMm, burn.hover.yMm) : null)
+
+  /** The explained cell and, numbered, where each listed move passed nearest it (BURN-45). */
+  const explainedPx = $derived.by(() => {
+    void burn.view
+    const x = burn.explained
+    if (!x || !hasBurn || !isColor) return null
+    const moves = (x.explanation?.moves ?? []).map((m, i) => ({ n: i + 1, line: m.line, ...burn.toPx(m.atXMm, m.atYMm) }))
+    return { at: burn.toPx(x.xMm, x.yMm), moves }
+  })
 
   /** Calibration cells to outline: the one under the pointer and the picked one, in CSS px. */
   const cellBoxes = $derived.by(() => {
@@ -295,6 +312,12 @@
           aria-hidden="true"
         ></div>
       {/each}
+      {#if explainedPx}
+        <div class="pin" style:left="{explainedPx.at.x}px" style:top="{explainedPx.at.y}px" aria-hidden="true"></div>
+        {#each explainedPx.moves as m (m.line)}
+          <div class="move-dot" style:left="{m.x}px" style:top="{m.y}px" aria-hidden="true">{m.n}</div>
+        {/each}
+      {/if}
       {#if marker}
         <div class="head" style:left="{marker.x}px" style:top="{marker.y}px" aria-hidden="true"></div>
       {/if}
@@ -325,6 +348,7 @@
 
     {#if hasBurn && isColor}
       <BestCellCard />
+      {#if !calibration.active}<ExplainCard />{/if}
     {/if}
 
     {#if chip}
@@ -562,6 +586,32 @@
     top: -9px;
     width: 1px;
     height: 18px;
+  }
+  .pin {
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    margin: -7px 0 0 -7px;
+    border-radius: 50%;
+    border: 2px solid var(--accent);
+    box-shadow: var(--shadow-outline);
+    pointer-events: none;
+  }
+  .move-dot {
+    position: absolute;
+    width: 16px;
+    height: 16px;
+    margin: -8px 0 0 -8px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: var(--on-accent);
+    box-shadow: var(--shadow-hairline);
+    font-family: var(--font-mono);
+    font-size: var(--text-2xs);
+    line-height: 16px;
+    text-align: center;
+    pointer-events: none;
+    opacity: 0.85;
   }
   .head {
     position: absolute;

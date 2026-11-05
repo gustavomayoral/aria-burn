@@ -21,6 +21,7 @@ import {
   SampleStore,
   Verdict,
   decodeSampleBatch,
+  explainAt,
   detailGrid,
   detailSetup,
   fireSpots,
@@ -31,6 +32,7 @@ import {
   watchContextLoss,
   type BurnLayer,
   type BurnViewport,
+  type CellExplanation,
   type CellReadout,
   type ChannelEvent,
   type ContextWatch,
@@ -133,6 +135,12 @@ class BurnEngine {
   /** Fit view's mm per CSS pixel; zoom is relative to it. */
   fitMmPerPx = $state(0.1)
   hover = $state<{ xMm: number; yMm: number; readout: CellReadout | null } | null>(null)
+  /**
+   * The clicked cell's outcome explanation (BURN-45): the moves that made it
+   * and why it got its verdict, computed on the CPU from the samples near it.
+   * `ms` is click-to-answer time (the query, not the redraw).
+   */
+  explained = $state<{ xMm: number; yMm: number; explanation: CellExplanation | null; ms: number } | null>(null)
   grid = $state<GridInfo | null>(null)
   /** Largest fire-risk patch at the current cutoff, if any. */
   fire = $state<FireSpot | null>(null)
@@ -247,6 +255,7 @@ class BurnEngine {
     this.sim = null
     this.burn = null
     this.hover = null
+    this.explained = null
     if (this.restoring) return
     this.restoring = true
     this.restoreTimer = setTimeout(() => {
@@ -419,6 +428,7 @@ class BurnEngine {
     this.fire = null
     this.verdicts = []
     this.hover = null
+    this.explained = null
     this.headS = 0
     this.progress = 1
     this.follow = true
@@ -709,6 +719,37 @@ class BurnEngine {
     this.hover = null
   }
 
+  // ── Explain (BURN-45) ────────────────────────────────────────────────
+
+  /** Explain the cell under canvas point (px, py) at the current cutoff. */
+  explainAt(px: number, py: number): void {
+    const { xMm, yMm } = this.toMm(px, py)
+    this.explainMm(xMm, yMm)
+  }
+
+  private explainMm(xMm: number, yMm: number): void {
+    const store = this.store
+    if (!this.reader || !store) return
+    const model = this.live ? this.live.job : (this.job?.model ?? null)
+    const t0 = performance.now()
+    const explanation = explainAt(this.reader, store, xMm, yMm, this.cutoffS(), model)
+    const ms = performance.now() - t0
+    this.explained = { xMm, yMm, explanation, ms }
+  }
+
+  /** Re-explain the same spot after a run (scrub, live growth), keeping the first answer's timing. */
+  private refreshExplained(): void {
+    const e = this.explained
+    if (!e) return
+    const ms = e.ms
+    this.explainMm(e.xMm, e.yMm)
+    if (this.explained) this.explained.ms = ms
+  }
+
+  clearExplained(): void {
+    this.explained = null
+  }
+
   // ── Results for other views ──────────────────────────────────────────
 
   /** The layer the canvas shows. */
@@ -819,6 +860,7 @@ class BurnEngine {
           this.status = 'ready'
           this.refreshSummary()
           this.version++
+          this.refreshExplained()
           this.scheduleDetail()
           if (!this.detailTimer) this.rendering = false
           p.draw = true
