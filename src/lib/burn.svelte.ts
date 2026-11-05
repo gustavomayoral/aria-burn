@@ -506,6 +506,11 @@ class BurnEngine {
    * (BURN-35). It reruns in full only when that plan changes (the bounds cross
    * a block edge, the duration doubles), on a new material or machine, after a
    * missing batch, and once job.loaded switches to the job plan.
+   * The job grid's pitch is sized from the bounds streamed so far (BURN-42):
+   * it steps up by whole multiples of the detail pitch as the job grows and
+   * ends on the pitch the job gets from a file. A step changes the grid like
+   * growth does (rebuildSetup reports it, the view refits); the thermal plan,
+   * the detail view and the hover readout don't depend on it.
    */
   private scheduleLive(): void {
     if (this.liveTimer) return

@@ -150,7 +150,7 @@
       <span>{job?.kind === 'live' && job.durationS === null ? 'Streamed' : 'Est. time'}</span><span>{ready ? fmtDuration(burn.totalS) : '—'}</span>
       {#if job?.kind === 'live'}<span>Samples</span><span>{job.samples.toLocaleString('en-US')}</span>{/if}
     </div>
-    <p class="note">Timing from the GRBL planner{job?.kind === 'file' ? ' (same as streaming it)' : ''}. Detail pitch = spot σ ÷ 3; the overview may use a multiple of it to stay fast on this GPU. Large jobs split into tiles.</p>
+    <p class="note">Timing from the GRBL planner{job?.kind === 'file' ? ' (same as streaming it)' : ''}. Detail pitch = spot σ ÷ 3; the overview may use a multiple of it to stay fast on this GPU{job?.kind === 'live' && job.durationS === null ? ', and while a job streams that multiple steps up as the job grows' : ''}. Large jobs split into tiles.</p>
   </div>
 
   {#if app.source === 'live'}
