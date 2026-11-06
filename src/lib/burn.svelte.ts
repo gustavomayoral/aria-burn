@@ -38,6 +38,7 @@ import {
   type ContextWatch,
   type Diagnostic,
   type FireSpot,
+  type ThermalStep,
   type Heightmap,
   type JobModel,
   type MachineProfile,
@@ -413,6 +414,24 @@ class BurnEngine {
   private fail(kind: JobKind, name: string, message: string): void {
     this.job = { kind, jobId: 0, name, model: null, diagnostics: [{ severity: 'error', code: 'open-failed', line: 0, message }], durationS: null, samples: 0, batches: 0, mismatch: null, aborted: null }
     this.status = 'error'
+  }
+
+  /**
+   * The samples of the loaded file job named `name`, with the GPU thermal step
+   * when there is one, for the photo fit (BURN-15): the fit simulates exactly
+   * the motion the burn view shows (Rust parser and GRBL planner). Null until
+   * every batch is in.
+   */
+  samplesFor(name: string): { store: SampleStore; thermalStep: ThermalStep | undefined } | null {
+    const job = this.job
+    const store = this.store
+    if (!job || job.kind !== 'file' || job.name !== name || !store || !store.lastBatchSeen || this.live) return null
+    return { store, thermalStep: this.sim?.thermalStep ?? undefined }
+  }
+
+  /** The GPU thermal step, when the GPU has one (the photo fit in the browser build). */
+  get gpuThermalStep(): ThermalStep | undefined {
+    return this.sim?.thermalStep ?? undefined
   }
 
   /** Back to the empty state (drops the job and its GPU results). */

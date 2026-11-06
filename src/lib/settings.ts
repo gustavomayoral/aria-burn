@@ -9,6 +9,7 @@ import { isTauri } from '@tauri-apps/api/core'
 import { MachineProfile, checkMachineProfile, validate, type MachineProfile as Machine } from 'aria-burn-core/contract'
 import { readMachineReadings, readingProblems, type MachineReadingsLibrary } from './machine-readings.ts'
 import { readMaterialSettings, settingProblems, type MaterialSettingsLibrary } from './material-settings.ts'
+import { readUserMaterials, userMaterialProblems, type UserMaterialsLibrary } from './user-materials.ts'
 import { DEFAULT_EXAGGERATION, isExaggeration, type Exaggeration } from './relief.ts'
 import { PROFILE_FIELDS, defaultMachineEntry, readLibrary, type FieldSource, type MachineFieldStatus, type MachineLibrary } from './machines.ts'
 
@@ -18,6 +19,7 @@ const KEY = 'settings'
 const LIBRARY_KEY = 'machines'
 const MATERIAL_SETTINGS_KEY = 'materialSettings'
 const MACHINE_READINGS_KEY = 'machineReadings'
+const USER_MATERIALS_KEY = 'userMaterials'
 
 export type ViewMode = 'color' | 'height'
 
@@ -190,6 +192,19 @@ export async function saveMachineReadings(library: MachineReadingsLibrary): Prom
     if (problems.length) throw new Error(`machine reading invalid: ${problems.join('; ')}`)
   }
   await (await getBackend()).write(MACHINE_READINGS_KEY, plainCopy(library))
+}
+
+/** Materials fitted from a photographed grid (BURN-15). */
+export async function loadUserMaterials(): Promise<{ library: UserMaterialsLibrary; warnings: string[] }> {
+  return readUserMaterials(await (await getBackend()).read(USER_MATERIALS_KEY))
+}
+
+export async function saveUserMaterials(library: UserMaterialsLibrary): Promise<void> {
+  for (const m of library.materials) {
+    const problems = userMaterialProblems(m)
+    if (problems.length) throw new Error(`calibrated material “${m.profile.name}” invalid: ${problems.join('; ')}`)
+  }
+  await (await getBackend()).write(USER_MATERIALS_KEY, plainCopy(library))
 }
 
 export async function saveSettings(settings: Settings): Promise<void> {

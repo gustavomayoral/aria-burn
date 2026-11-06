@@ -217,9 +217,47 @@ pub fn export_save(app: tauri::AppHandle, request: tauri::ipc::Request<'_>) -> R
     Ok(path.to_string_lossy().into_owned())
 }
 
+/// A file name for a calibration record: plain, no path separators, no leading dot.
+fn calibration_name_ok(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 120
+        && !name.starts_with('.')
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+}
+
+/// Writes one file of a user calibration record (BURN-15: photo, G-code, machine
+/// profile, fit) to `<app data>/calibrations/<id>/<name>` and returns its path.
+/// The bytes are the raw invoke body; the record id and file name are the
+/// `x-calibration-id` and `x-file-name` headers.
+#[tauri::command]
+pub fn calibration_save(app: tauri::AppHandle, request: tauri::ipc::Request<'_>) -> Result<String, String> {
+    use tauri::{Manager, ipc::InvokeBody};
+    let header = |k: &str| request.headers().get(k).and_then(|v| v.to_str().ok()).unwrap_or_default().to_owned();
+    let (id, name) = (header("x-calibration-id"), header("x-file-name"));
+    if !calibration_name_ok(&id) || !calibration_name_ok(&name) {
+        return Err(format!("Bad calibration record name {id:?}/{name:?}"));
+    }
+    let InvokeBody::Raw(bytes) = request.body() else { return Err("Calibration body must be raw bytes".into()) };
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("calibrations").join(&id);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("Can't create {}: {e}", dir.display()))?;
+    let path = dir.join(&name);
+    std::fs::write(&path, bytes).map_err(|e| format!("Can't write {}: {e}", path.display()))?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn calibration_record_names() {
+        assert!(calibration_name_ok("cal-birch-2026-11-06"));
+        assert!(calibration_name_ok("photo.jpg"));
+        assert!(!calibration_name_ok("../escape"));
+        assert!(!calibration_name_ok("a/b"));
+        assert!(!calibration_name_ok(".hidden"));
+        assert!(!calibration_name_ok(""));
+    }
 
     fn profile() -> MachineProfile {
         let json = std::fs::read_to_string(

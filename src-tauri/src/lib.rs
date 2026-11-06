@@ -58,7 +58,8 @@ pub fn run() {
             emulator::emulator_configure,
             job::job_open,
             job::launch_file,
-            job::export_save
+            job::export_save,
+            job::calibration_save
         ])
         .run(context)
         .expect("error while running Aria Burn");

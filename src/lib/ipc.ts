@@ -123,3 +123,7 @@ export const saveExport = (name: string, bytes: Uint8Array) => invoke<string>('e
 
 /** A file to open at startup (command-line argument or ARIA_BURN_OPEN), or null. */
 export const launchFile = () => (isTauri() ? invoke<string | null>('launch_file') : Promise.resolve(null))
+
+/** Writes one file of a calibration record to the app's data folder (BURN-15); resolves to the written path. */
+export const saveCalibrationFile = (id: string, name: string, bytes: Uint8Array) =>
+  invoke<string>('calibration_save', bytes, { headers: { 'x-calibration-id': id, 'x-file-name': name } })

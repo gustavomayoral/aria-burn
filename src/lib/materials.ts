@@ -1,13 +1,26 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Material list for the sidebar: the core's provisional profiles (COD-266),
-// until calibration (COD-254) replaces them.
+// and the user's profiles calibrated from a photographed grid (BURN-15).
 
 import type { Lab, MaterialProfile } from 'aria-burn-core/contract'
 import acrylic from 'aria-burn-core/profiles/provisional/black-cast-acrylic.json'
 import aluminum from 'aria-burn-core/profiles/provisional/black-anodized-aluminum.json'
 import birch from 'aria-burn-core/profiles/provisional/birch-ply.json'
 
+/** The built-in (provisional) profiles. */
 export const MATERIALS = [birch, acrylic, aluminum] as MaterialProfile[]
+
+/**
+ * The user's calibrated profiles (BURN-15) come from a source the photo-fit
+ * state registers; reading it inside a $derived keeps the list reactive.
+ */
+let userSource: () => readonly MaterialProfile[] = () => []
+export function useUserMaterials(source: () => readonly MaterialProfile[]): void {
+  userSource = source
+}
+
+/** Built-in profiles, then the user's calibrated ones. */
+export const allMaterials = (): MaterialProfile[] => [...MATERIALS, ...userSource()]
 
 export const KIND_LABEL: Record<MaterialProfile['response']['kind'], string> = {
   char: 'Char',
@@ -15,7 +28,7 @@ export const KIND_LABEL: Record<MaterialProfile['response']['kind'], string> = {
   bleach: 'Bleach',
 }
 
-export const findMaterial = (id: string) => MATERIALS.find((m) => m.id === id) ?? MATERIALS[0]!
+export const findMaterial = (id: string) => allMaterials().find((m) => m.id === id) ?? MATERIALS[0]!
 
 /** Colour a fully marked area takes, per response kind. */
 export function markColor(m: MaterialProfile): Lab {

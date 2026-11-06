@@ -4,7 +4,8 @@
   import { app } from '../lib/app.svelte.ts'
   import { calibration } from '../lib/calibration.svelte.ts'
   import { settingsFor } from '../lib/material-settings.ts'
-  import { KIND_LABEL, MATERIALS, findMaterial, labToCss } from '../lib/materials.ts'
+  import { KIND_LABEL, allMaterials, findMaterial, labToCss } from '../lib/materials.ts'
+  import { photoFit } from '../lib/photo-fit.svelte.ts'
 
   const selected = $derived(findMaterial(app.settings.ui.materialId))
   /** Settings picked from calibration patterns for this material (BURN-32). */
@@ -47,7 +48,7 @@
   <div>
     <div class="section-label">Material</div>
     <div class="list">
-      {#each MATERIALS as m (m.id)}
+      {#each allMaterials() as m (m.id)}
         <button class="material" aria-pressed={m.id === selected.id} onclick={() => pick(m)}>
           <span class="swatch" style:background={labToCss(m.response.baseColor)} aria-hidden="true"></span>
           <span class="text">
@@ -60,7 +61,17 @@
     {#if selected.provenance.source === 'provisional'}
       <p class="note">Provisional profiles from published data, not yet validated against real burns. Treat predictions as approximate.</p>
     {/if}
-    <button class="btn wide" onclick={() => (calibration.open = true)}>Test patterns…</button>
+    {#if photoFit.isUser(selected.id)}
+      {@const entry = photoFit.library.materials.find((m) => m.profile.id === selected.id)}
+      <p class="note">
+        Calibrated{selected.provenance.meanDeltaE !== undefined ? ` · mean ΔE ${selected.provenance.meanDeltaE.toFixed(2)} on its grid` : ''} · {entry?.machine.name}.
+        <button class="link" onclick={() => photoFit.removeMaterial(selected.id)}>Delete</button>
+      </p>
+    {/if}
+    <div class="buttons">
+      <button class="btn wide" onclick={() => (calibration.open = true)}>Test patterns…</button>
+      <button class="btn wide" onclick={() => photoFit.begin(app.settings.machine, selected)}>Fit from a photo…</button>
+    </div>
   </div>
   <div>
     <div class="section-label">Your settings</div>
@@ -89,11 +100,24 @@
         <span>{label}</span><span>{value}</span>
       {/each}
     </div>
-    <p class="note">Read-only in v1. Refit per laser by calibration later.</p>
+    <p class="note">Read-only here. Fit them to your laser and material with “Fit from a photo”.</p>
   </details>
 </aside>
 
 <style>
+  .buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .link {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--accent-text);
+    font: inherit;
+    cursor: pointer;
+  }
   aside {
     flex: 0 0 272px;
     min-width: 240px;
