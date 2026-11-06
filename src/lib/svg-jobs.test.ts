@@ -32,16 +32,28 @@ function placements(doc: SvgDocument, bed: { x: number; y: number }): [string, P
   ]
 }
 
-/** Every layer in line mode; `passes` also gives the first layer two passes and turns the last one's output off. */
+/**
+ * Every layer in line mode; `passes` also gives the first layer two passes and
+ * turns the last one's output off. `fill` and `hatch` put every layer in fill
+ * mode: back-and-forth at 0°, and one direction at 30° with crosshatch.
+ */
 function layerSetups(doc: SvgDocument): [string, SvgJobLayer[]][] {
   const line = svgJobLayers(doc).map((l) => ({ id: l.id, settings: { ...l.settings, mode: 'line' as const } }))
   const passes = line.map((l, i) => ({
     id: l.id,
     settings: { ...l.settings, passes: i === 0 ? 2 : 1, output: line.length < 2 || i < line.length - 1, maxPowerPct: 20 + 10 * (i % 5), speedMmPerMin: 900 + 300 * i },
   }))
+  // Fill (BURN-52) at coarse intervals: the check is exact per move, so density adds files, not coverage.
+  const fill = line.map((l) => ({ id: l.id, settings: { ...l.settings, mode: 'fill' as const, fill: { ...l.settings.fill, intervalMm: 0.5, overscanMm: 2 } } }))
+  const hatch = line.map((l) => ({
+    id: l.id,
+    settings: { ...l.settings, mode: 'fill' as const, fill: { intervalMm: 1, angleDeg: 30, bidirectional: false, overscanMm: 1, crosshatch: true } },
+  }))
   return [
     ['line', line],
     ['passes', passes],
+    ['fill', fill],
+    ['hatch', hatch],
   ]
 }
 
@@ -67,7 +79,7 @@ describe('SVG import jobs for the Rust parser and planner check', () => {
           for (const [lName, layers] of layerSetups(doc)) {
             const r = svgJob(doc, layers, placement, machine)
             if (!r.job.burnBounds) continue
-            expect(r.diagnostics.filter((d) => d.code === 'off-bed')).toEqual([])
+            expect(r.diagnostics.filter((d) => d.code === 'off-bed' || d.code === 'overscan-off-bed')).toEqual([])
             const file = `${id}.${name}.${pName}.${lName}.gcode`
             writeFileSync(OUT + file, r.gcode)
             writeFileSync(OUT + file.replace(/\.gcode$/, '.job.json'), JSON.stringify(r.job))
