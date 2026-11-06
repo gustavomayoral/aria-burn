@@ -7,11 +7,11 @@
 // (vitest), the same handler runs inline.
 
 import type { MachineProfile } from 'aria-burn-core/contract'
-import { DEFAULT_PLACEMENT, readSvg, svgJob, type SvgDocument, type SvgJobDiagnostic, type SvgJobLayer } from 'aria-burn-core/svg'
+import { DEFAULT_PLACEMENT, readSvg, svgJob, type Placement, type SvgDocument, type SvgJobDiagnostic, type SvgJobLayer } from 'aria-burn-core/svg'
 
 export type SvgRequest =
   | { seq: number; type: 'read'; text: string; pxPerInch: number }
-  | { seq: number; type: 'job'; layers: SvgJobLayer[]; machine: MachineProfile; name: string }
+  | { seq: number; type: 'job'; layers: SvgJobLayer[]; machine: MachineProfile; name: string; placement?: Placement }
 
 export interface SvgJobResult {
   gcode: string
@@ -35,8 +35,8 @@ export function createHandler(): (req: SvgRequest) => SvgReply {
         return { seq: req.seq, type: 'read', doc }
       }
       if (!doc) return { seq: req.seq, type: 'error', message: 'No SVG has been read' }
-      // Placement is BURN-51's default (true size, page bottom-left at the bed origin) until BURN-54.
-      const job = svgJob(doc, req.layers, DEFAULT_PLACEMENT, req.machine, { name: req.name })
+      // Without a placement: BURN-51's default (true size, page bottom-left at the bed origin).
+      const job = svgJob(doc, req.layers, req.placement ?? DEFAULT_PLACEMENT, req.machine, { name: req.name })
       return { seq: req.seq, type: 'job', gcode: job.gcode, diagnostics: job.diagnostics, estimatedTimeS: job.estimatedTimeS }
     } catch (e) {
       const line = e && typeof e === 'object' && 'line' in e && typeof e.line === 'number' && e.line > 0 ? ` (line ${e.line})` : ''

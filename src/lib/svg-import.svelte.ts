@@ -5,11 +5,18 @@
 // through the same path as a G-code file (Rust parser → GRBL planner →
 // simulator), named after the SVG. Every layer change re-simulates, debounced;
 // a newer open cancels the running plan as opening another file does.
+//
+// Placement (BURN-54) lives here with the layers, so a project file (BURN-55)
+// saves both. A design opens in Place mode at the default placement (the
+// identity, as BURN-53 loaded it) while its burn simulates behind; placement
+// edits in Place mode wait for "Simulate", edits outside it re-simulate like a
+// layer change.
 
 import type { MachineProfile } from 'aria-burn-core/contract'
 import type { SvgDiagnostic, SvgDocument, SvgJobDiagnostic } from 'aria-burn-core/svg'
 import { burn } from './burn.svelte.ts'
 import { carryLayers, initialLayers, jobLayers, layerRows, nothingBurns, patchLayer, type LayerPatch, type LayerState } from './svg-layers.ts'
+import { defaultPlacement, placeGeometry, samePlacement, type PlaceGeometry, type Placement } from './svg-place.ts'
 import { SvgWork } from './svg-work.ts'
 
 export const RESIMULATE_DELAY_MS = 300
@@ -30,6 +37,14 @@ class SvgImport {
   jobDiagnostics = $state.raw<SvgJobDiagnostic[]>([])
   /** px per inch the document was read at. */
   pxPerInch = $state(DEFAULT_PX_PER_INCH)
+  /** Where the design sits on the bed (aria-burn-core Placement, on the content box). */
+  placement = $state.raw<Placement>({ xMm: 0, yMm: 0, anchor: 'bottom-left', scale: 1, rotationDeg: 0 })
+  /** The document reduced for placement (hulls), made once per read. */
+  geometry = $state.raw<PlaceGeometry | null>(null)
+  /** Place mode: the canvas shows the bed and the design as vectors. */
+  placing = $state(false)
+  /** The burn on screen was made at another placement (edited in Place mode, not simulated yet). */
+  placementStale = $state(false)
 
   private text = ''
   private machine: MachineProfile | null = null
@@ -38,6 +53,8 @@ class SvgImport {
   /** Bumped by every open and every simulation; a stale result is dropped. */
   private generation = 0
   private simulated = false
+  /** The placement of the burn last opened. */
+  private simulatedAt: Placement | null = null
 
   /** The SVG import is what the canvas shows (a G-code file or live job replaces it). */
   get active(): boolean {
@@ -89,12 +106,21 @@ class SvgImport {
       return
     }
     if (gen !== this.generation) return
+    const oldGeometry = this.geometry
+    const geometry = placeGeometry(doc)
+    // A re-read keeps a placement the user set; an untouched one follows the new size.
+    const keepPlacement = previous !== null && oldGeometry !== null && !samePlacement(this.placement, defaultPlacement(oldGeometry))
     this.doc = doc
+    this.geometry = geometry
     this.pxPerInch = pxPerInch
     this.layers = previous ? carryLayers(previous, doc) : initialLayers(doc)
+    if (!keepPlacement) this.placement = defaultPlacement(geometry)
+    this.placementStale = false
+    if (!previous) this.placing = true
     if (!this.layers.some((l) => l.id === this.selected)) this.selected = null
     this.jobDiagnostics = []
     this.simulated = false
+    this.simulatedAt = null
     await this.simulate()
   }
 
@@ -113,6 +139,30 @@ class SvgImport {
     this.schedule()
   }
 
+  /** A new placement: shown at once in Place mode, simulated on "Simulate"; elsewhere re-simulated like a layer change. */
+  setPlacement(p: Placement): void {
+    if (samePlacement(p, this.placement, 0)) return
+    this.placement = p
+    if (this.placing) this.placementStale = true
+    else this.schedule()
+  }
+
+  /** Enter Place mode (the "Place" button). */
+  place(): void {
+    if (this.doc) this.placing = true
+  }
+
+  /** Leave Place mode ("Simulate"): runs the burn at the new placement if it changed. */
+  finishPlacing(): void {
+    if (!this.placing) return
+    this.placing = false
+    if (this.placementStale) {
+      this.placementStale = false
+      this.cancelTimer()
+      void this.simulate()
+    }
+  }
+
   /** Re-simulate after the last change settles. */
   schedule(): void {
     this.cancelTimer()
@@ -122,7 +172,11 @@ class SvgImport {
     }, RESIMULATE_DELAY_MS)
   }
 
-  /** Makes the job from the current layers and opens its G-code (named after the SVG). */
+  /**
+   * Makes the job from the current layers and placement and opens its G-code
+   * (named after the SVG). The view is kept across layer changes and fitted
+   * again when the placement changed, since the burn has moved.
+   */
   async simulate(): Promise<void> {
     const doc = this.doc
     const name = this.name
@@ -130,6 +184,7 @@ class SvgImport {
     // A newer change, or another file opened since, wins.
     if (this.simulated && burn.origin !== 'svg') return
     const gen = ++this.generation
+    const placement = this.placement
     if (nothingBurns(layerRows(doc, this.layers))) {
       this.busy = null
       this.jobDiagnostics = []
@@ -140,7 +195,7 @@ class SvgImport {
     this.busy = 'building'
     let result
     try {
-      result = await this.worker.job({ layers: jobLayers(this.layers), machine: this.machine, name })
+      result = await this.worker.job({ layers: jobLayers(this.layers), machine: this.machine, name, placement: { ...placement } })
     } catch (e) {
       if (gen !== this.generation) return
       this.busy = null
@@ -150,9 +205,11 @@ class SvgImport {
     if (gen !== this.generation || (this.simulated && burn.origin !== 'svg')) return
     this.busy = null
     this.jobDiagnostics = result.diagnostics.filter((d) => d.code !== 'nothing-to-burn')
-    const keepView = this.simulated
+    const keep = this.simulated && this.simulatedAt !== null && samePlacement(placement, this.simulatedAt, 0)
     this.simulated = true
-    await burn.openFile({ kind: 'text', name, text: result.gcode }, false, { origin: 'svg', keepView })
+    this.simulatedAt = placement
+    if (samePlacement(placement, this.placement, 0)) this.placementStale = false
+    await burn.openFile({ kind: 'text', name, text: result.gcode }, false, { origin: 'svg', keepView: keep })
   }
 
   /** Forget the SVG (another file was opened). */
@@ -167,6 +224,10 @@ class SvgImport {
     this.jobDiagnostics = []
     this.text = ''
     this.simulated = false
+    this.geometry = null
+    this.simulatedAt = null
+    this.placing = false
+    this.placementStale = false
   }
 
   private cancelTimer() {

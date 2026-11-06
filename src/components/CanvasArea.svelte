@@ -15,6 +15,7 @@
   import { scaleBar } from '../lib/verdicts.ts'
   import BestCellCard from './BestCellCard.svelte'
   import ExplainCard from './ExplainCard.svelte'
+  import PlaceView from './PlaceView.svelte'
 
   const VIEW_MODES: { id: ViewMode; label: string }[] = [
     { id: 'color', label: 'Color' },
@@ -38,6 +39,10 @@
   const hasBurn = $derived(shownJob !== null && status === 'ready' && burn.grid !== null)
   const errors = $derived(shownJob?.diagnostics.filter((d) => d.severity === 'error') ?? [])
   const warnings = $derived(shownJob?.diagnostics.filter((d) => d.severity === 'warning') ?? [])
+  /** Place mode for an imported SVG (BURN-54) covers the burn view. */
+  const placeShown = $derived(
+    app.source === 'file' && svgImport.placing && svgImport.geometry !== null && (burn.origin === 'svg' || svgImport.busy !== null),
+  )
 
   function setPref<K extends keyof typeof ui>(key: K, value: (typeof ui)[K]) {
     app.settings.ui[key] = value
@@ -96,13 +101,13 @@
     return { x: e.clientX - r.left, y: e.clientY - r.top }
   }
   function onDown(e: PointerEvent) {
-    if (!hasBurn || !isColor || e.button !== 0) return
+    if (placeShown || !hasBurn || !isColor || e.button !== 0) return
     // Controls and cards over the canvas (zoom, explanation) take their own clicks.
     drag = { x: e.clientX, y: e.clientY, moved: false, onCanvas: e.target === canvas }
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
   }
   function onMove(e: PointerEvent) {
-    if (!hasBurn || !isColor) return
+    if (placeShown || !hasBurn || !isColor) return
     if (drag) {
       const dx = e.clientX - drag.x
       const dy = e.clientY - drag.y
@@ -135,7 +140,7 @@
     drag = null
   }
   function onWheel(e: WheelEvent) {
-    if (!hasBurn || !isColor) return
+    if (placeShown || !hasBurn || !isColor) return
     e.preventDefault()
     const p = local(e)
     // Trackpad pinch arrives as ctrl+wheel; both zoom around the cursor.
@@ -143,7 +148,7 @@
     burn.hoverAt(p.x, p.y)
   }
   function onKey(e: KeyboardEvent) {
-    if (!hasBurn || !isColor) return
+    if (placeShown || !hasBurn || !isColor) return
     const step = 40
     if (e.key === '+' || e.key === '=') burn.zoomAt(2)
     else if (e.key === '-') burn.zoomAt(0.5)
@@ -237,6 +242,9 @@
     {/each}
   </div>
   <div class="tools">
+    {#if app.source === 'file' && svgImport.active && !svgImport.placing}
+      <button class="btn small" onclick={() => svgImport.place()} title="Show the bed and move, scale or rotate the design">Place</button>
+    {/if}
     <label class:off={!isColor || !hasBurn}>
       <input type="checkbox" checked={ui.verdictOverlay} disabled={!isColor || !hasBurn} onchange={(e) => setPref('verdictOverlay', e.currentTarget.checked)} />
       Verdict overlay
@@ -294,7 +302,9 @@
       {/await}
     {/if}
 
-    {#if hasBurn && isColor}
+    {#if placeShown}
+      <PlaceView />
+    {:else if hasBurn && isColor}
       {#if hoverPx && !drag?.moved}
         <div class="cross" style:left="{hoverPx.x}px" style:top="{hoverPx.y}px" aria-hidden="true"></div>
       {/if}
@@ -343,19 +353,21 @@
       {/if}
     {/if}
 
-    {#if hasBurn && isColor}
+    {#if hasBurn && isColor && !placeShown}
       <BestCellCard />
       {#if !calibration.active}<ExplainCard />{/if}
     {/if}
 
-    {#if chip}
+    {#if chip && !placeShown}
       <div class="chip" role="status"><span class="dot" style:background={chip.dot}></span>{chip.label}</div>
     {/if}
     {#if exportNote}
       <div class="toast" role="status">{exportNote}</div>
     {/if}
 
-    {#if burn.glError}
+    {#if placeShown}
+      <!-- Place mode shows the design; the burn runs behind it. -->
+    {:else if burn.glError}
       <div class="center">
         <div class="card error">
           <strong>The burn view can’t run</strong>

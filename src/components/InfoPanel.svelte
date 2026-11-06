@@ -7,6 +7,7 @@
   import { ILLUSTRATOR_PX_PER_INCH, DEFAULT_PX_PER_INCH, svgImport } from '../lib/svg-import.svelte.ts'
   import { fmtDuration, legendFor, verdictLabel, verdictSwatch } from '../lib/verdicts.ts'
   import LayerPanel from './LayerPanel.svelte'
+  import PlacementPanel from './PlacementPanel.svelte'
 
   let dismissed = $state<number | null>(null)
 
@@ -51,6 +52,11 @@
     const g = burn.grid
     return g ? `${g.widthMm.toFixed(1)} × ${g.heightMm.toFixed(1)} mm (so far)` : '—'
   })
+  /** Bed position of the burn's bottom-left corner: where a placed SVG landed (BURN-54). */
+  const burnAt = $derived.by(() => {
+    const b = job?.model?.burnBounds
+    return b ? `${b.minXMm.toFixed(1)}, ${b.minYMm.toFixed(1)} mm` : '—'
+  })
   const warnings = $derived(ready ? (job?.diagnostics.filter((d) => d.severity === 'warning') ?? []) : [])
   const streamErrors = $derived(job?.kind === 'live' ? job.diagnostics.filter((d) => d.severity === 'error' && d.code !== 'sender-disconnected' && d.code !== 'job-reset') : [])
   const kelvinToC = (k: number) => `${Math.round(k - 273.15)} °C`
@@ -77,6 +83,7 @@
 <aside>
   {#if svg}
     <LayerPanel />
+    <PlacementPanel />
     {#if svgImport.dpiAssumed || svgImport.pxPerInch !== DEFAULT_PX_PER_INCH}
       <div class="callout warn">
         <strong>Size read at {svgImport.pxPerInch} DPI</strong>
@@ -179,6 +186,7 @@
     <div class="section-label">Job</div>
     <div class="kv">
       <span>Bounds</span><span>{ready ? bounds : '—'}</span>
+      <span>Bottom left</span><span>{ready ? burnAt : '—'}</span>
       <span>Grid pitch</span><span title="Overview pitch; zoomed-in detail and hover use the detail pitch (BURN-37)">{burn.grid ? (burn.grid.pitchMm > burn.grid.detailPitchMm * 1.001 ? `${(burn.grid.pitchMm * 1000).toFixed(1)} µm (detail ${(burn.grid.detailPitchMm * 1000).toFixed(1)} µm)` : `${(burn.grid.pitchMm * 1000).toFixed(1)} µm`) : '—'}</span>
       <span>Grid</span><span>{burn.grid && ready ? `${burn.grid.cells[0].toLocaleString('en-US')} × ${burn.grid.cells[1].toLocaleString('en-US')}` : '—'}</span>
       <span>Tiles</span><span>{burn.grid && ready ? (burn.grid.tileRects.length > 1 ? `${burn.grid.tiles[0]} × ${burn.grid.tiles[1]}` : '1 (untiled)') : '—'}</span>
