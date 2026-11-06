@@ -58,6 +58,7 @@ pub fn run() {
             emulator::emulator_configure,
             job::job_open,
             job::launch_file,
+            job::read_text_file,
             job::export_save,
             job::calibration_save
         ])

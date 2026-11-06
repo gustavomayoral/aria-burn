@@ -11,9 +11,9 @@
   import Timeline from './components/Timeline.svelte'
   import TopBar from './components/TopBar.svelte'
   import { app } from './lib/app.svelte.ts'
-  import { burn } from './lib/burn.svelte.ts'
   import { calibration } from './lib/calibration.svelte.ts'
   import { launchFile, runSmoke, smokeConfig, smokeReport } from './lib/ipc.ts'
+  import { openPath } from './lib/open-file.ts'
 
   let smokeRunning = $state(false)
 
@@ -32,7 +32,7 @@
     }
     await app.startEmulator()
     const path = await launchFile()
-    if (path) void burn.openFile({ kind: 'path', path })
+    if (path) void openPath(path)
   })
 </script>
 

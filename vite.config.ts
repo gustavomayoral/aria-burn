@@ -22,6 +22,8 @@ export default defineConfig({
     watch: { ignored: ['**/src-tauri/**', '**/target/**'] },
   },
   envPrefix: ['VITE_', 'TAURI_ENV_'],
+  // The SVG import worker (BURN-53) is an ES module worker.
+  worker: { format: 'es' },
   build: {
     target: 'es2022',
     sourcemap: true,

@@ -4,7 +4,9 @@
   import { app } from '../lib/app.svelte.ts'
   import { burn } from '../lib/burn.svelte.ts'
   import { findMaterial } from '../lib/materials.ts'
+  import { ILLUSTRATOR_PX_PER_INCH, DEFAULT_PX_PER_INCH, svgImport } from '../lib/svg-import.svelte.ts'
   import { fmtDuration, legendFor, verdictLabel, verdictSwatch } from '../lib/verdicts.ts'
+  import LayerPanel from './LayerPanel.svelte'
 
   let dismissed = $state<number | null>(null)
 
@@ -52,6 +54,18 @@
   const warnings = $derived(ready ? (job?.diagnostics.filter((d) => d.severity === 'warning') ?? []) : [])
   const streamErrors = $derived(job?.kind === 'live' ? job.diagnostics.filter((d) => d.severity === 'error' && d.code !== 'sender-disconnected' && d.code !== 'job-reset') : [])
   const kelvinToC = (k: number) => `${Math.round(k - 273.15)} °C`
+  const svg = $derived(app.source === 'file' && svgImport.active)
+  /** What reading the SVG and making its moves reported (BURN-53); the px-size note gets its own callout. */
+  const svgNotes = $derived(
+    svg
+      ? [
+          ...svgImport.readDiagnostics
+            .filter((d) => d.code !== 'px-size-assumed-dpi')
+            .map((d) => ({ severity: d.severity, message: d.count > 1 ? `${d.message} (×${d.count})` : d.message })),
+          ...svgImport.jobDiagnostics.map((d) => ({ severity: d.severity, message: d.message })),
+        ]
+      : [],
+  )
 
   function showFire() {
     if (!fire) return
@@ -61,6 +75,28 @@
 </script>
 
 <aside>
+  {#if svg}
+    <LayerPanel />
+    {#if svgImport.dpiAssumed || svgImport.pxPerInch !== DEFAULT_PX_PER_INCH}
+      <div class="callout warn">
+        <strong>Size read at {svgImport.pxPerInch} DPI</strong>
+        <span>
+          This SVG gives its size in px or no unit, so {svgImport.pxPerInch} px per inch was assumed{svgImport.doc ? `: ${svgImport.doc.widthMm.toFixed(1)} × ${svgImport.doc.heightMm.toFixed(1)} mm` : ''}.
+          {svgImport.pxPerInch === DEFAULT_PX_PER_INCH ? 'Older Illustrator exports use 72.' : ''}
+        </span>
+        <button class="go-warn" disabled={svgImport.busy !== null} onclick={() => svgImport.setPxPerInch(svgImport.pxPerInch === DEFAULT_PX_PER_INCH ? ILLUSTRATOR_PX_PER_INCH : DEFAULT_PX_PER_INCH)}
+          >Use {svgImport.pxPerInch === DEFAULT_PX_PER_INCH ? ILLUSTRATOR_PX_PER_INCH : DEFAULT_PX_PER_INCH} DPI</button
+        >
+      </div>
+    {/if}
+    {#if svgNotes.length}
+      <details class="callout warn" open={svgNotes.some((n) => n.severity === 'error')}>
+        <summary><strong>{svgNotes.length} SVG note{svgNotes.length > 1 ? 's' : ''}</strong></summary>
+        {#each svgNotes.slice(0, 10) as n, i (i)}<span>{n.message}</span>{/each}
+      </details>
+    {/if}
+  {/if}
+
   {#each app.warnings as w (w)}
     <div class="callout warn"><strong>Settings</strong><span>{w}</span></div>
   {/each}
@@ -278,6 +314,16 @@
     min-width: 24px;
     min-height: 24px;
     border-radius: var(--radius);
+  }
+  .go-warn {
+    align-self: flex-start;
+    min-height: 24px;
+    padding: 0 10px;
+    border-radius: var(--radius);
+    border: 1px solid var(--warn-border);
+    background: transparent;
+    color: var(--warn-text);
+    font-size: var(--text-xs);
   }
   .go {
     align-self: flex-start;

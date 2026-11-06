@@ -48,6 +48,15 @@ import {
 import { isTauri, openJob, type JobInput } from './ipc.ts'
 
 export type JobKind = 'file' | 'live'
+/** Where a file job's G-code came from: a G-code file, or made from an SVG in the webview (BURN-53). */
+export type FileOrigin = 'gcode' | 'svg'
+
+export interface OpenOptions {
+  /** Default 'gcode'. */
+  origin?: FileOrigin
+  /** Keep the user's pan and zoom when the job loads (a re-simulation of the same design). */
+  keepView?: boolean
+}
 /** What the canvas shows: no job, a job being read or simulated, a burn, or why there is none. */
 export type BurnStatus = 'empty' | 'parsing' | 'planning' | 'thermal' | 'ready' | 'error'
 
@@ -158,6 +167,8 @@ class BurnEngine {
   restoring = $state(false)
   times = $state<RunTimes>({ coarse: null, full: null, detail: null, draw: null })
   canvasSize = $state({ width: 0, height: 0 })
+  /** Origin of the current file job (null for none or a live job). */
+  origin = $state<FileOrigin | null>(null)
 
   private canvas: HTMLCanvasElement | null = null
   private gl: WebGL2RenderingContext | null = null
@@ -311,14 +322,20 @@ class BurnEngine {
   // ── File jobs ────────────────────────────────────────────────────────
 
   /** Opens a G-code file: Rust parses and plans it (aria-burn-gcode → GRBL planner), samples stream back. */
-  async openFile(input: JobInput, planErrors = false): Promise<void> {
+  async openFile(input: JobInput, planErrors = false, options: OpenOptions = {}): Promise<void> {
     if (!this.machine) return
+    const origin = options.origin ?? 'gcode'
+    this.lastOptions = { origin }
     if (!isTauri()) {
       this.fail('file', input.kind === 'path' ? input.path : input.name, 'Opening G-code needs the desktop app (pnpm tauri dev).')
+      this.origin = origin
       return
     }
     const jobId = nextFileJobId++
+    const keepView = !!options.keepView && this.userMoved
     this.reset()
+    this.origin = origin
+    this.keepView = keepView
     const name = input.kind === 'path' ? (input.path.split(/[\\/]/).pop() ?? input.path) : input.name
     this.job = { kind: 'file', jobId, name, model: null, diagnostics: [], durationS: null, samples: 0, batches: 0, mismatch: null, aborted: null }
     this.status = 'parsing'
@@ -344,11 +361,21 @@ class BurnEngine {
   }
 
   private lastInput: JobInput | null = null
+  private lastOptions: OpenOptions = {}
   private planErrors = false
+  private keepView = false
 
   /** Re-opens the last file with its failing lines dropped (as GRBL drops them). */
   simulateAnyway(): Promise<void> {
-    return this.lastInput ? this.openFile(this.lastInput, true) : Promise.resolve()
+    return this.lastInput ? this.openFile(this.lastInput, true, this.lastOptions) : Promise.resolve()
+  }
+
+  /** Shows why a file can't be simulated, without opening anything (an SVG that can't be read or burns nothing). */
+  failFile(name: string, message: string, origin: FileOrigin): void {
+    nextFileJobId++
+    this.reset()
+    this.fail('file', name, message)
+    this.origin = origin
   }
 
   private onFileEvent(jobId: number, msg: ChannelEvent): void {
@@ -405,9 +432,12 @@ class BurnEngine {
       // Let the "Computing heat build-up" state paint before the thermal step blocks.
       await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)))
     }
-    this.userMoved = false
     this.updateFit()
-    this.fit()
+    if (this.keepView) this.queue('draw')
+    else {
+      this.userMoved = false
+      this.fit()
+    }
     this.queue('full')
   }
 
@@ -443,6 +473,8 @@ class BurnEngine {
     this.reader = null
     this.live = null
     this.job = null
+    this.origin = null
+    this.keepView = false
     this.grid = null
     this.fire = null
     this.verdicts = []

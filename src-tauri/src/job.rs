@@ -191,7 +191,7 @@ pub async fn job_open(
         .map_err(|e| e.to_string())?
 }
 
-/// A G-code file to open at startup: the first command-line argument (open
+/// A G-code or SVG file to open at startup: the first command-line argument (open
 /// with / drag onto the app icon), or `ARIA_BURN_OPEN` for scripted runs.
 #[tauri::command]
 pub fn launch_file() -> Option<String> {
@@ -200,6 +200,29 @@ pub fn launch_file() -> Option<String> {
         .filter(|a| !a.starts_with('-'))
         .or_else(|| std::env::var("ARIA_BURN_OPEN").ok())
         .filter(|p| !p.is_empty())
+}
+
+/// Largest file `read_text_file` returns (64 MB): a big Aria Studio SVG is a few MB.
+pub const TEXT_FILE_MAX_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Reads a file as UTF-8 text, refusing anything over `max` bytes.
+pub fn read_text_capped(path: &Path, max: u64) -> Result<String, String> {
+    let name = path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
+    let len = std::fs::metadata(path).map_err(|e| format!("Can't read {name}: {e}"))?.len();
+    if len > max {
+        return Err(format!("{name} is {:.1} MB; the limit is {} MB", len as f64 / 1e6, max / (1024 * 1024)));
+    }
+    let bytes = std::fs::read(path).map_err(|e| format!("Can't read {name}: {e}"))?;
+    String::from_utf8(bytes).map_err(|_| format!("{name} is not UTF-8 text"))
+}
+
+/// Reads a dropped or launch file (an SVG, BURN-53) as text for the webview,
+/// size-capped, so the webview needs no general file-system access.
+#[tauri::command]
+pub async fn read_text_file(path: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || read_text_capped(Path::new(&path), TEXT_FILE_MAX_BYTES))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// Writes an exported image to the user's Downloads folder and returns its path.
@@ -248,6 +271,21 @@ pub fn calibration_save(app: tauri::AppHandle, request: tauri::ipc::Request<'_>)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn read_text_capped_reads_text_and_refuses_large_or_binary_files() {
+        let dir = std::env::temp_dir().join(format!("aria-burn-read-text-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let svg = dir.join("a.svg");
+        std::fs::write(&svg, "<svg/>").unwrap();
+        assert_eq!(read_text_capped(&svg, 100).unwrap(), "<svg/>");
+        assert!(read_text_capped(&svg, 3).unwrap_err().contains("limit"));
+        let bin = dir.join("b.svg");
+        std::fs::write(&bin, [0xff, 0xfe, 0x00]).unwrap();
+        assert!(read_text_capped(&bin, 100).unwrap_err().contains("UTF-8"));
+        assert!(read_text_capped(&dir.join("missing.svg"), 100).unwrap_err().contains("Can't read"));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn calibration_record_names() {

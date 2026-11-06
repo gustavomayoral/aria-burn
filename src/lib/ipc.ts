@@ -127,3 +127,6 @@ export const launchFile = () => (isTauri() ? invoke<string | null>('launch_file'
 /** Writes one file of a calibration record to the app's data folder (BURN-15); resolves to the written path. */
 export const saveCalibrationFile = (id: string, name: string, bytes: Uint8Array) =>
   invoke<string>('calibration_save', bytes, { headers: { 'x-calibration-id': id, 'x-file-name': name } })
+
+/** Reads a dropped or launch file as text (size-capped in Rust), for SVG import (BURN-53). */
+export const readTextFile = (path: string) => invoke<string>('read_text_file', { path })
