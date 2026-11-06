@@ -7,8 +7,7 @@
   import { describeConnection } from '../lib/emulator.ts'
   import { exportColor, exportHeight } from '../lib/export.ts'
   import { isTauri } from '../lib/ipc.ts'
-  import { openPath, openText } from '../lib/open-file.ts'
-  import { OPEN_ACCEPT } from '../lib/open-route.ts'
+  import { chooseFile, openPath, openText } from '../lib/open-file.ts'
   import { svgImport } from '../lib/svg-import.svelte.ts'
   import { findMaterial } from '../lib/materials.ts'
   import type { ViewMode } from '../lib/settings.ts'
@@ -24,7 +23,6 @@
 
   let canvas: HTMLCanvasElement
   let stage: HTMLDivElement
-  let fileInput: HTMLInputElement
   let dragOver = $state(false)
   let exportOpen = $state(false)
   let exportNote = $state<string | null>(null)
@@ -77,14 +75,6 @@
       unlisten?.()
     }
   })
-
-  async function onPick(e: Event) {
-    const file = (e.currentTarget as HTMLInputElement).files?.[0]
-    if (!file) return
-    const text = await file.text()
-    fileInput.value = ''
-    await openText(file.name, text)
-  }
 
   // Browser drop (pnpm dev without Tauri, where drops reach the page).
   async function onDrop(e: DragEvent) {
@@ -414,9 +404,9 @@
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--fg-muted)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
             ><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg
           >
-          <strong>Open a G-code job or an SVG</strong>
-          <p>Drop a .gcode or .svg file here, or switch to Live to receive jobs from LightBurn or LaserGRBL.</p>
-          <button class="btn primary big" onclick={() => fileInput.click()}>Choose file…</button>
+          <strong>Open a G-code job, an SVG or a project</strong>
+          <p>Drop a .gcode, .svg or .ariaburn file here, or switch to Live to receive jobs from LightBurn or LaserGRBL.</p>
+          <button class="btn primary big" onclick={() => chooseFile()}>Choose file…</button>
           {#if !isTauri()}<p class="sub">Opening files needs the desktop app (<code>pnpm tauri dev</code>).</p>{/if}
         </div>
       </div>
@@ -435,7 +425,7 @@
           {#if errors.length > 6}<p class="sub">…and {errors.length - 6} more errors.</p>{/if}
           {#if shownJob.kind === 'file'}
             <div class="actions">
-              <button class="btn" onclick={() => fileInput.click()}>Open another file</button>
+              <button class="btn" onclick={() => chooseFile()}>Open another file</button>
               {#if shownJob.model?.burnBounds}
                 <button class="btn" onclick={() => burn.simulateAnyway()} title="Plan the job with the failing lines dropped, as GRBL would">Simulate without these lines</button>
               {/if}
@@ -461,7 +451,6 @@
   </div>
 </div>
 
-<input bind:this={fileInput} type="file" accept={OPEN_ACCEPT} hidden onchange={onPick} />
 
 <style>
   .cell-box {

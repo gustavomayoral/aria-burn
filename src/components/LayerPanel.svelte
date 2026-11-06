@@ -3,6 +3,7 @@
      selected layer's settings. Every change re-simulates (svg-import.svelte.ts). -->
 <script lang="ts">
   import type { LayerSettings } from 'aria-burn-core/svg'
+  import { replaceSvg } from '../lib/open-file.ts'
   import type { LayerPatch, LayerRow } from '../lib/svg-layers.ts'
   import { svgImport } from '../lib/svg-import.svelte.ts'
 
@@ -31,7 +32,15 @@
 
 <section aria-label="SVG layers">
   <div class="section-label">Layers</div>
-  <p class="file" title={svgImport.name}>{svgImport.name}{svgImport.busy === 'building' ? ' · updating…' : ''}</p>
+  <div class="file-row">
+    <p class="file" title={svgImport.name}>{svgImport.name}{svgImport.busy === 'building' ? ' · updating…' : ''}</p>
+    <button
+      class="replace"
+      disabled={svgImport.busy !== null}
+      title="Swap in another SVG: layers whose colour is still there keep their settings, new colours get defaults"
+      onclick={() => replaceSvg()}>Replace SVG…</button
+    >
+  </div>
   <ul>
     {#each rows as r (r.id)}
       {@const off = !r.settings.visible || !r.settings.output}
@@ -109,8 +118,30 @@
     display: flex;
     flex-direction: column;
   }
-  .file {
+  .file-row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
     margin: 0 0 8px;
+  }
+  .replace {
+    flex: 0 0 auto;
+    padding: 0 6px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: transparent;
+    font-size: var(--text-xs);
+    line-height: var(--leading-xs);
+    color: var(--fg);
+  }
+  .replace:hover:not(:disabled) {
+    border-color: var(--line-strong);
+    color: var(--fg-strong);
+  }
+  .file {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin: 0;
     font-size: var(--text-xs);
     line-height: var(--leading-xs);
     color: var(--fg-muted);

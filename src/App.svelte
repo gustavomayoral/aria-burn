@@ -12,10 +12,46 @@
   import TopBar from './components/TopBar.svelte'
   import { app } from './lib/app.svelte.ts'
   import { calibration } from './lib/calibration.svelte.ts'
-  import { launchFile, runSmoke, smokeConfig, smokeReport } from './lib/ipc.ts'
-  import { openPath } from './lib/open-file.ts'
+  import { QUIT_REQUESTED_EVENT, appQuit, isTauri, launchFile, runSmoke, smokeConfig, smokeReport, setUnsaved } from './lib/ipc.ts'
+  import { chooseFile, openPath } from './lib/open-file.ts'
+  import { project } from './lib/project.svelte.ts'
 
   let smokeRunning = $state(false)
+
+  // Closing or quitting with unsaved project changes asks first (BURN-55): Rust
+  // stops the close while the flag is set and sends quit-requested.
+  $effect(() => {
+    void setUnsaved(project.dirty)
+  })
+
+  onMount(() => {
+    let unlisten: (() => void) | null = null
+    if (isTauri())
+      void import('@tauri-apps/api/event').then(async ({ listen }) => {
+        unlisten = await listen(QUIT_REQUESTED_EVENT, async () => {
+          if (await project.confirmDiscard()) await appQuit()
+        })
+      })
+    return () => unlisten?.()
+  })
+
+  /** Browser dev mode: the page's own leave prompt. */
+  function onBeforeUnload(e: BeforeUnloadEvent) {
+    if (!isTauri() && project.dirty) e.preventDefault()
+  }
+
+  /** Open ⌘O, Save ⌘S, Save As ⇧⌘S (Ctrl on Windows and Linux). */
+  function onKey(e: KeyboardEvent) {
+    if (!(e.metaKey || e.ctrlKey) || e.altKey || app.screen !== 'main') return
+    const k = e.key.toLowerCase()
+    if (k === 'o' && !e.shiftKey) {
+      e.preventDefault()
+      void chooseFile()
+    } else if (k === 's' && project.canSave) {
+      e.preventDefault()
+      void (e.shiftKey ? project.saveAs() : project.save())
+    }
+  }
 
   onMount(async () => {
     await app.load()
@@ -35,6 +71,8 @@
     if (path) void openPath(path)
   })
 </script>
+
+<svelte:window onkeydown={onKey} onbeforeunload={onBeforeUnload} />
 
 {#if app.screen === 'settings'}
   <SettingsScreen />

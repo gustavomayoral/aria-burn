@@ -4,6 +4,10 @@
   import { app } from '../lib/app.svelte.ts'
   import { burn } from '../lib/burn.svelte.ts'
   import { describeConnection } from '../lib/emulator.ts'
+  import { chooseFile } from '../lib/open-file.ts'
+  import { project } from '../lib/project.svelte.ts'
+
+  const mod = typeof navigator !== 'undefined' && navigator.userAgent.includes('Mac') ? '⌘' : 'Ctrl+'
 
   const fileStatus = $derived.by(() => {
     const job = burn.job
@@ -13,7 +17,9 @@
     const m4 = job.model?.moves.some((m) => m.laser === 'm4')
     const mode = job.model ? (m4 ? ' · M4' : ' · M3') : ''
     const passes = (job.model?.passes.length ?? 0) > 1 ? ` · ${job.model!.passes.length} passes` : ''
-    return `${job.name}${size}${mode}${passes}`
+    // A project shows its file name first, with a dot while it has unsaved changes (BURN-55).
+    const proj = project.fileName && project.canSave ? `${project.fileName}${project.dirty ? ' •' : ''} · ` : ''
+    return `${proj}${job.name}${size}${mode}${passes}`
   })
 
   // Live pill: green streaming/connected, amber listening, red failed or dropped mid-job.
@@ -40,6 +46,15 @@
     <button aria-pressed={app.source === 'file'} onclick={() => (app.source = 'file')}>File</button>
     <button aria-pressed={app.source === 'live'} onclick={() => (app.source = 'live')}>Live (GRBL)</button>
   </div>
+  {#if app.source === 'file'}
+    <div class="files" role="group" aria-label="File">
+      <button onclick={() => chooseFile()} title="Open a project, an SVG or G-code ({mod}O)">Open…</button>
+      <button disabled={!project.canSave} onclick={() => project.save()} title="Save the SVG with its layer settings and placement as a project ({mod}S)"
+        >Save{project.dirty ? ' •' : ''}</button
+      >
+      <button disabled={!project.canSave} onclick={() => project.saveAs()} title="Save the project to a new file ({mod}⇧S)">Save As…</button>
+    </div>
+  {/if}
   <div class="status">
     {#if app.source === 'live'}
       <span class="pill {pill.tone}"><span class="dot"></span>{pill.label}</span>
@@ -85,6 +100,29 @@
     width: 28px;
     height: 28px;
     flex: 0 0 auto;
+  }
+  .files {
+    display: flex;
+    gap: 4px;
+  }
+  .files button {
+    padding: 2px 8px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: transparent;
+    font-size: var(--text-xs);
+    line-height: var(--leading-xs);
+    color: var(--fg);
+    white-space: nowrap;
+  }
+  .files button:hover:not(:disabled) {
+    border-color: var(--line-strong);
+    background: var(--raised);
+    color: var(--fg-strong);
+  }
+  .files button:disabled {
+    color: var(--fg-muted);
+    opacity: 0.6;
   }
   .status {
     flex: 1 1 auto;

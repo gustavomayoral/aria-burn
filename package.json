@@ -25,9 +25,10 @@
   },
   "dependencies": {
     "@aria/theme": "link:../AriaStudio/aria-studio/packages/aria-theme",
-    "aria-burn-core": "link:../aria-burn-core",
     "@tauri-apps/api": "^2.12",
+    "@tauri-apps/plugin-dialog": "^2",
     "@tauri-apps/plugin-store": "^2.5",
+    "aria-burn-core": "link:../aria-burn-core",
     "three": "^0.187"
   },
   "devDependencies": {

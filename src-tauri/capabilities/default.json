@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Main window: core IPC (incl. Channels) and the settings store",
+  "description": "Main window: core IPC (incl. Channels), the settings store, and native Open/Save dialogs for project files",
   "windows": ["main"],
-  "permissions": ["core:default", "store:default"]
+  "permissions": ["core:default", "store:default", "dialog:default"]
 }

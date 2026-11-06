@@ -130,3 +130,18 @@ export const saveCalibrationFile = (id: string, name: string, bytes: Uint8Array)
 
 /** Reads a dropped or launch file as text (size-capped in Rust), for SVG import (BURN-53). */
 export const readTextFile = (path: string) => invoke<string>('read_text_file', { path })
+
+/** Writes a project file (.ariaburn only) at a path picked in the native Save dialog (BURN-55). */
+export const projectWrite = (path: string, text: string) => invoke<void>('project_write', { path, text })
+
+/** Reads a project file (.ariaburn only) as text. */
+export const projectRead = (path: string) => invoke<string>('project_read', { path })
+
+/** Tells Rust whether closing or quitting should ask first (unsaved project changes). */
+export const setUnsaved = (unsaved: boolean) => (isTauri() ? invoke<void>('set_unsaved', { unsaved }) : Promise.resolve())
+
+/** Quits without asking again (after the unsaved-changes prompt). */
+export const appQuit = () => invoke<void>('app_quit')
+
+/** Sent by Rust when the window is closed or the app quit with unsaved changes. */
+export const QUIT_REQUESTED_EVENT = 'quit-requested'

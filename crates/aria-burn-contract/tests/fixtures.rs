@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Conformance: every fixture in aria-burn-core's `src/contract/fixtures/`
 //! parses into the generated types and writes back to the same JSON (or bytes,
-//! for `sample-batch.bin`). Mirrors the fixture table in the core's
-//! contract.test.ts, so a fixture added there must be added here too.
+//! for `sample-batch.bin`); the webview-only project file is checked by its tag.
+//! Mirrors the fixture table in the core's contract.test.ts, so a fixture added there must be added here too.
 
 use std::{fs, path::PathBuf};
 
@@ -63,11 +63,23 @@ fn every_fixture_is_covered() {
         "material-char.json",
         "material-melt.json",
         "plan-done-event.json",
+        "project.ariaburn",
         "sample-batch.bin",
         "sample-batch.json",
         "status-event.json",
     ];
     assert_eq!(names, covered, "fixture set changed: add the new fixture to this test");
+}
+
+/// The .ariaburn project file (BURN-55) is read and written in the webview;
+/// Rust only moves its text, so it has no generated type. Check the tag the
+/// webview's parser checks first.
+#[test]
+fn project_fixture_is_a_version_1_project() {
+    let project = read_json("project.ariaburn");
+    assert_eq!(project["format"], "aria-burn-project");
+    assert_eq!(project["version"], 1);
+    assert!(project["svg"]["text"].as_str().is_some_and(|t| t.contains("<svg")));
 }
 
 #[test]

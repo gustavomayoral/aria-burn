@@ -11,10 +11,15 @@
 // identity, as BURN-53 loaded it) while its burn simulates behind; placement
 // edits in Place mode wait for "Simulate", edits outside it re-simulate like a
 // layer change.
+//
+// A project file (BURN-55, project.svelte.ts) restores a saved setup through
+// `open` with `restore`; "Replace SVG…" swaps the SVG and carries the layer
+// settings over by colour.
 
 import type { MachineProfile } from 'aria-burn-core/contract'
 import type { SvgDiagnostic, SvgDocument, SvgJobDiagnostic } from 'aria-burn-core/svg'
 import { burn } from './burn.svelte.ts'
+import { mergeLayers, type LayerMerge } from './project.ts'
 import { carryLayers, initialLayers, jobLayers, layerRows, nothingBurns, patchLayer, type LayerPatch, type LayerState } from './svg-layers.ts'
 import { defaultPlacement, placeGeometry, samePlacement, type PlaceGeometry, type Placement } from './svg-place.ts'
 import { SvgWork } from './svg-work.ts'
@@ -22,6 +27,12 @@ import { SvgWork } from './svg-work.ts'
 export const RESIMULATE_DELAY_MS = 300
 export const DEFAULT_PX_PER_INCH = 96
 export const ILLUSTRATOR_PX_PER_INCH = 72
+
+/** A saved setup to open the SVG with instead of the defaults (a project file). */
+export interface RestoreSetup {
+  layers: readonly { id: string; settings: LayerState['settings'] }[]
+  placement: Placement
+}
 
 const NOTHING_BURNS =
   'No layer burns anything: every layer is hidden, has its output off, or has no paths in its mode. Turn a layer’s output on in the Layers panel.'
@@ -45,8 +56,11 @@ class SvgImport {
   placing = $state(false)
   /** The burn on screen was made at another placement (edited in Place mode, not simulated yet). */
   placementStale = $state(false)
+  /** How the last project open or "Replace SVG…" carried the layers over; null after a plain open. */
+  layerMerge = $state.raw<LayerMerge | null>(null)
+  /** The SVG text, as read (saved in a project). */
+  text = $state.raw('')
 
-  private text = ''
   private machine: MachineProfile | null = null
   private work: SvgWork | null = null
   private timer: ReturnType<typeof setTimeout> | null = null
@@ -86,11 +100,16 @@ class SvgImport {
     if (changed && this.active) this.schedule()
   }
 
-  /** Opens an SVG's text: read it, set up its layers with defaults, simulate. */
-  async open(name: string, text: string, pxPerInch = DEFAULT_PX_PER_INCH, keepLayers = false): Promise<void> {
+  /**
+   * Opens an SVG's text: read it, set up its layers (defaults, the current
+   * ones with `keepLayers`, or a project's with `restore`), simulate.
+   * Resolves to false when the SVG couldn't be read.
+   */
+  async open(name: string, text: string, pxPerInch = DEFAULT_PX_PER_INCH, keepLayers = false, restore: RestoreSetup | null = null): Promise<boolean> {
     this.cancelTimer()
     const gen = ++this.generation
     const previous = keepLayers && this.doc ? $state.snapshot(this.layers) : null
+    if (!keepLayers) this.layerMerge = null
     this.name = name
     this.text = text
     this.busy = 'reading'
@@ -98,14 +117,14 @@ class SvgImport {
     try {
       doc = await this.worker.read({ text, pxPerInch })
     } catch (e) {
-      if (gen !== this.generation) return
+      if (gen !== this.generation) return false
       this.busy = null
       this.doc = null
       this.layers = []
       burn.failFile(name, `Can’t read this SVG: ${e instanceof Error ? e.message : String(e)}`, 'svg')
-      return
+      return false
     }
-    if (gen !== this.generation) return
+    if (gen !== this.generation) return false
     const oldGeometry = this.geometry
     const geometry = placeGeometry(doc)
     // A re-read keeps a placement the user set; an untouched one follows the new size.
@@ -113,21 +132,43 @@ class SvgImport {
     this.doc = doc
     this.geometry = geometry
     this.pxPerInch = pxPerInch
-    this.layers = previous ? carryLayers(previous, doc) : initialLayers(doc)
-    if (!keepPlacement) this.placement = defaultPlacement(geometry)
+    if (restore) {
+      const merge = mergeLayers(restore.layers, doc)
+      this.layers = merge.layers
+      this.layerMerge = merge
+      this.placement = { ...restore.placement }
+      this.placing = false
+    } else {
+      this.layers = previous ? carryLayers(previous, doc) : initialLayers(doc)
+      if (!keepPlacement) this.placement = defaultPlacement(geometry)
+      if (!previous) this.placing = true
+    }
     this.placementStale = false
-    if (!previous) this.placing = true
     if (!this.layers.some((l) => l.id === this.selected)) this.selected = null
     this.jobDiagnostics = []
     this.simulated = false
     this.simulatedAt = null
     await this.simulate()
+    return true
+  }
+
+  /**
+   * "Replace SVG…" (BURN-55): another SVG takes this one's place. Layers whose
+   * colour still exists keep their settings, new colours get defaults, and the
+   * dropped ones are listed (layerMerge). A placement the user set is kept.
+   */
+  async replace(name: string, text: string): Promise<boolean> {
+    if (!this.doc) return this.open(name, text)
+    const previous = $state.snapshot(this.layers)
+    const ok = await this.open(name, text, this.pxPerInch, true)
+    if (ok && this.doc) this.layerMerge = mergeLayers(previous, this.doc)
+    return ok
   }
 
   /** Re-reads the open SVG at another px-per-inch (72 for older Illustrator exports), keeping layer settings. */
-  setPxPerInch(pxPerInch: number): Promise<void> {
-    if (!this.name || pxPerInch === this.pxPerInch) return Promise.resolve()
-    return this.open(this.name, this.text, pxPerInch, true)
+  async setPxPerInch(pxPerInch: number): Promise<void> {
+    if (!this.name || pxPerInch === this.pxPerInch) return
+    await this.open(this.name, this.text, pxPerInch, true)
   }
 
   select(id: string | null): void {
@@ -228,6 +269,7 @@ class SvgImport {
     this.simulatedAt = null
     this.placing = false
     this.placementStale = false
+    this.layerMerge = null
   }
 
   private cancelTimer() {

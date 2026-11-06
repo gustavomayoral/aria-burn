@@ -6,12 +6,14 @@ mod bench;
 mod emulator;
 mod job;
 mod migrate;
+mod project;
 mod smoke;
 mod stream;
 
 use std::sync::Arc;
 
 use aria_burn_contract::ChannelEvent;
+use tauri::Manager;
 use tauri::ipc::{Channel, InvokeResponseBody};
 
 pub use stream::{StreamRequest, StreamTotals};
@@ -41,6 +43,13 @@ pub fn run() {
     migrate::run(&context.config().identifier);
     tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::default().build())
+        .plugin(tauri_plugin_dialog::init())
+        .menu(|app| {
+            #[cfg(target_os = "macos")]
+            return project::app_menu(app);
+            #[cfg(not(target_os = "macos"))]
+            tauri::menu::Menu::default(app)
+        })
         .setup(move |app| {
             if let Some(url) = bench_url.clone() {
                 bench::open(app, url)?;
@@ -50,6 +59,20 @@ pub fn run() {
         .manage(smoke)
         .manage(Arc::new(emulator::EmulatorState::default()))
         .manage(Arc::new(job::JobState::default()))
+        .manage(project::UnsavedState::default())
+        .on_menu_event(|app, event| {
+            if event.id() == project::QUIT_MENU_ID {
+                project::quit_from_menu(app);
+            }
+        })
+        .on_window_event(|window, event| {
+            // Closing the window with unsaved project changes asks first (BURN-55).
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event
+                && project::intercept_quit(window.app_handle())
+            {
+                api.prevent_close();
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             start_dummy_stream,
             smoke::smoke_config,
@@ -60,8 +83,21 @@ pub fn run() {
             job::launch_file,
             job::read_text_file,
             job::export_save,
-            job::calibration_save
+            job::calibration_save,
+            project::project_write,
+            project::project_read,
+            project::set_unsaved,
+            project::app_quit
         ])
-        .run(context)
-        .expect("error while running Aria Burn");
+        .build(context)
+        .expect("error while building Aria Burn")
+        .run(|app, event| {
+            // Quit (Cmd+Q, the app menu) with unsaved project changes asks first;
+            // `app_quit` exits with a code, which isn't stopped.
+            if let tauri::RunEvent::ExitRequested { code: None, api, .. } = &event
+                && project::intercept_quit(app)
+            {
+                api.prevent_exit();
+            }
+        });
 }

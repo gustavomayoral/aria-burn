@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from 'vitest'
-import { OPEN_ACCEPT, baseName, routeFor } from './open-route.ts'
+import { OPEN_ACCEPT, baseName, dialogExtensions, routeFor } from './open-route.ts'
 
 describe('open routing (BURN-53)', () => {
   it('routes .svg to SVG import, case-insensitively, from a name or a path', () => {
@@ -15,8 +15,15 @@ describe('open routing (BURN-53)', () => {
       expect(routeFor(name), name).toBe('gcode')
   })
 
-  it('the picker accepts G-code and SVG', () => {
-    expect(OPEN_ACCEPT.split(',')).toEqual(['.gcode', '.gc', '.nc', '.ngc', '.txt', '.svg'])
+  it('routes .ariaburn to project open (BURN-55)', () => {
+    expect(routeFor('job.ariaburn')).toBe('project')
+    expect(routeFor('/Users/me/Job.AriaBurn')).toBe('project')
+    expect(routeFor('job.ariaburn.gcode')).toBe('gcode')
+  })
+
+  it('the picker accepts projects, SVG and G-code', () => {
+    expect(OPEN_ACCEPT.split(',')).toEqual(['.ariaburn', '.svg', '.gcode', '.gc', '.nc', '.ngc', '.txt'])
+    expect(dialogExtensions(['.ariaburn', '.svg'])).toEqual(['ariaburn', 'svg'])
   })
 
   it('names a path by its last part, with either separator', () => {

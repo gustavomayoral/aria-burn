@@ -7,6 +7,8 @@
   import { ILLUSTRATOR_PX_PER_INCH, DEFAULT_PX_PER_INCH, svgImport } from '../lib/svg-import.svelte.ts'
   import { fmtDuration, legendFor, verdictLabel, verdictSwatch } from '../lib/verdicts.ts'
   import LayerPanel from './LayerPanel.svelte'
+  import { project } from '../lib/project.svelte.ts'
+  import { mergeNote } from '../lib/project.ts'
   import PlacementPanel from './PlacementPanel.svelte'
 
   let dismissed = $state<number | null>(null)
@@ -81,7 +83,23 @@
 </script>
 
 <aside>
+  {#if project.error}
+    <div class="callout danger" role="alert">
+      <strong>Project</strong><span>{project.error}</span>
+      <button class="go-warn" onclick={() => (project.error = null)}>Dismiss</button>
+    </div>
+  {/if}
   {#if svg}
+    {#each project.notices as n, i (n)}
+      <div class="callout warn" role="status">
+        <strong>Opened with other settings</strong><span>{n}</span>
+        <button class="go-warn" onclick={() => project.dismissNotice(i)}>Dismiss</button>
+      </div>
+    {/each}
+    {@const merged = svgImport.layerMerge ? mergeNote(svgImport.layerMerge) : null}
+    {#if merged}
+      <div class="callout warn" role="status"><strong>Layers changed</strong><span>{merged}</span></div>
+    {/if}
     <LayerPanel />
     <PlacementPanel />
     {#if svgImport.dpiAssumed || svgImport.pxPerInch !== DEFAULT_PX_PER_INCH}

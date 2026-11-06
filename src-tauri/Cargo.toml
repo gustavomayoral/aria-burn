@@ -23,5 +23,7 @@ serde.workspace = true
 serde_json.workspace = true
 tauri = { version = "2.12", features = [] }
 tauri-plugin-store = "2.5"
+# Native Save / Open dialogs for project files (BURN-55).
+tauri-plugin-dialog = "2.8"
 # Same major as Tauri uses, for the per-user folders it names after the identifier.
 dirs = "7"
